@@ -104,8 +104,10 @@ def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
     labelIm = buildGT(os.path.join(dataFolder,"S"+siteNumber))
     mosaic = read_Color_Image(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+".jpg"))
     boxes = readBB(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"BBoxes.txt"))
-    #cv2.imwrite("ou.png",labelIm)
-    #cv2.imwrite("mosou.png",mosaic)
+    print("reading "+str(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"ROI.jpg")))
+    ROI = read_Binary_Mask(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"ROI.jpg"))
+    # apply ROI (black out everything outside of the ROI the ROI is black on white so 0 is inside)
+    mosaic[ROI!=0] = (0,0,0)
 
     # slice the three things and output
     wSize = (slice,slice)
@@ -137,6 +139,9 @@ def prepareDataFolder(dataFolder,sites,outFolder,slice):
         and a list of sieNumbers
         calls sliceFolder for all the sites in the list
     """
+    # make output folder if it did not exist
+    Path(outFolder).mkdir(parents=True, exist_ok=True)
+
     for site in sites:
         print("Starting site "+str(site))
         sliceFolder(dataFolder,site,outputFolder, slice)

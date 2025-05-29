@@ -158,6 +158,20 @@ def extractMask(label_image, box):
 
     return mask
 
+def readClassDict(file):
+    """
+        Read a file containing a class
+        dictionary as a pair of keys in every
+        line
+    """
+    retDict = {0:0}
+    with open(file) as f:
+        lines = f.readlines()
+        for line in lines:
+            retDict[int(line.strip().split(",")[0])] = int(line.strip().split(",")[1])
+    return retDict
+
+
 # sources
 # https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html
 # https://pytorch.org/vision/main/models.html
@@ -166,7 +180,7 @@ class TDDataset(Dataset):
         Dataset for object detection with
         pytorch predefined networks
     """
-    def __init__(self, dataFolder = None, slice = 1000 , transform = None, verbose = False):
+    def __init__(self, dataFolder = None, slice = 1000 , transform = None, classDictFile = "", verbose = False):
         """
             Receive a folder, PRE SLICED!:
             Each piece of data is made up of three parts
@@ -176,7 +190,6 @@ class TDDataset(Dataset):
 
             Create list of names for the three types of files and a dictionary to reconstruct the slices
         """
-        print("creating "+str(dataFolder)+" "+str(slice)+" "+str(transform)+" "+str(verbose))
         # Data Structures:
         self.imageNameList = []
         self.labelNameList = []
@@ -186,9 +199,8 @@ class TDDataset(Dataset):
         self.slicesToImages = defaultdict(lambda:[])
 
         # create output Folder if it does not exist
-        self.outFolder = os.path.join(dataFolder,"forOD")
-
-        Path(self.outFolder).mkdir(parents=True, exist_ok=True)
+        #self.outFolder = os.path.join(dataFolder,"forOD")
+        #Path(self.outFolder).mkdir(parents=True, exist_ok=True)
 
         for dirpath, dnames, fnames in os.walk(dataFolder):
             for f in fnames:
@@ -203,7 +215,14 @@ class TDDataset(Dataset):
                     self.labelNameList.append(labelName)
                     self.boxNameList.append(boxFileName)
                     self.slicesToImages[siteName].append((imName,labelName,boxFileName))
+
+        # class dictionary 
+        self.classDict = {} if classDictFile == "" else readClassDict(classDictFile)
+        self.numClasses = max(self.classDict.values()) + 1 if len(self.classDict) > 0 else self.findMaxClass() + 1 # the +1 are there to account for the background class
+
         if verbose:
+            print("\n\n\n")
+            print(self.classDict)
             print("\n\n\n")
             print(self.imageNameList)
             print("\n\n\n")
@@ -212,7 +231,8 @@ class TDDataset(Dataset):
             print(self.boxNameList)
             print("\n\n\n")
             print(self.slicesToImages)
-
+            print("\n\n\n")
+            print(self.getNumClasses())
 
     def __getitem__(self, idx):
 
@@ -220,13 +240,10 @@ class TDDataset(Dataset):
         img_path = self.imageNameList[idx]
         label_path = self.labelNameList[idx]
         img = Image.open(img_path)
-        #img.save("owwwu.png")
-
+ 
         #print(label_path)
         labelIm = cv2.imread(label_path,cv2.IMREAD_UNCHANGED)
-        #cv2.imwrite("owwwaaaaau.tif",labelIm)
-        #print(np.unique(labelIm))
-
+ 
         boxesRaw = readBB(self.boxNameList[idx]) # raw boxes are px,py,w,h,cat
 
         #print(boxes)
@@ -240,10 +257,11 @@ class TDDataset(Dataset):
         boxes = []
         labels = []
         masks = []
-        for px,py,w,h,l in boxesRaw:
+        for px,py,w,h, cat in boxesRaw:
+            l = self.classDict[cat] if len(self.classDict) > 0 else cat # look up the label corresponding to this category if necessary 
             boxes.append([px, py,px + w, py + h])
             labels.append(l)
-            masks.append(extractMask(labelIm,(px,py,w,h,l)))
+            masks.append(extractMask(labelIm,(px,py,w,h,cat)))
         # transform labels and masks to torch tensor
         torch.tensor(labels, dtype=torch.int64)
         #masks = torch.as_tensor(masks, dtype=torch.uint8)
@@ -264,6 +282,21 @@ class TDDataset(Dataset):
         #print(target)
         return img, target
 
+    def findMaxClass(self):
+        """
+            When we are not give a
+            class dictionary, 
+            find the maximum class by going over 
+            the list of boxes 
+        """
+        maxCat = 0
+        for idx in range(len(self)):
+            boxesRaw = readBB(self.boxNameList[idx]) # raw boxes are px,py,w,h,cat
+            for px,py,w,h, cat in boxesRaw:
+                if cat > maxCat: maxCat = cat
+        return maxCat
+
+
     def __len__(self):
         return len(self.imageNameList)
 
@@ -272,6 +305,14 @@ class TDDataset(Dataset):
         return the information about how everything was sliced
         """
         return self.slicesToImages
+
+    def getNumClasses(self):
+        """
+            Go over all boxes to see how many different 
+            categories we have
+            take into account class dictionary
+        """
+        return self.numClasses
 
     def saveVisualizations(self, output_dir, label_colors=None):
         """
@@ -291,7 +332,7 @@ class TDDataset(Dataset):
             masks = target["masks"]
 
             # Determine number of classes and generate colors if not given
-            num_classes = labels.max().item() + 1 if len(labels) > 0 else 1
+            num_classes = self.getNumClasses()
             if label_colors is None:
                 colors = [tuple(torch.randint(0, 256, (3,), dtype=torch.uint8).tolist()) for _ in range(num_classes)]
             else:
@@ -320,7 +361,11 @@ class TDDataset(Dataset):
 
 
 if __name__ == '__main__':
-    #print("This main does nothing at the moment, why are you calling it?")
+
     inData = sys.argv[1]
-    aDataset = TDDataset( dataFolder = inData, slice = 1000 , transform = None, verbose = False )
-    aDataset.saveVisualizations("./outVisual")
+    if os.path.exists(sys.argv[2]):
+        aDataset = TDDataset( dataFolder = inData, slice = 1000 , transform = None, classDictFile = sys.argv[2], verbose = True )
+    else:
+        print("dictionary file does not exist")    
+        aDataset = TDDataset( dataFolder = inData, slice = 1000 , transform = None, verbose = True )
+    if len(sys.argv) > 3: aDataset.saveVisualizations(sys.argv[3])

@@ -52,10 +52,9 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False):
     # use the GPU or the CPU, if a GPU is not available
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    if  conf["Prep"]:
-        pass
-        # consider redoing this with function prepareDataFolder from datahandling
+    # the pre processing may be added here instead of doign it separately
 
+    # at the moment yolo is NOT WORKING WITH THIS CODE
     f = open(conf["outTEXT"][:-4]+"YOLO"+conf["outTEXT"][-4:],"w+")
     print("consider YOLO? "+str(doYolo))
     # start YOLO experiment
@@ -98,14 +97,20 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False):
     print("consider pytorch models? "+str(doPytorchModels))
     f = open(conf["outTEXT"][:-4]+"FRCNN"+conf["outTEXT"][-4:],"w+")
 
-    # our dataset has two classes only - background and Kanji
-    num_classes = 47 # we need to compute this number from the dataset!!!!!
     bs = 64 # should probably be a parameter
     proportion = conf["Train_Perc"]/100
 
     print("creating dataset in experiment")
-    dataset = TDDataset(os.path.join(conf["TV_dir"],conf["Train_dir"]), conf["slice"], get_transform())
-    #dataset_test = ODDataset(os.path.join(conf["TV_dir"],conf["Test_dir"]), True, conf["slice"], get_transform())
+    # add dictionary file
+    if os.path.exists(conf["dict_file"]):
+        dataset = TDDataset(conf["Train_dir"], conf["slice"], get_transform(), classDictFile = conf["dict_file"], verbose = False)
+        dataset_test = TDDataset(conf["Test_dir"], conf["slice"], get_transform(), classDictFile = conf["dict_file"],verbose = False)
+    else:
+        print("no dictionary file!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")    
+        dataset = TDDataset(conf["Train_dir"], conf["slice"], get_transform(), verbose = False)
+        dataset_test = TDDataset(conf["Test_dir"], conf["slice"], get_transform(), verbose = False)
+
+    num_classes = max(dataset.getNumClasses(),dataset_test.getNumClasses()) # should check between test and training datasets in case one class is not present in some of the two
 
     print("Experiments, train dataset length "+str(len(dataset) ))
 
