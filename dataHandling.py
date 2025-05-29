@@ -12,6 +12,7 @@ from pathlib import Path
 #from patch_classification import loadModelReadClassDict,testAndOutputForAnnotations
 import re
 import numpy as np
+from scipy import ndimage
 
 
 def isSpeciesMask(file,sn):
@@ -69,16 +70,34 @@ def readBB(file_path):
         return list(map(lambda l: tuple(map(int, l.split())), f))
 
 
+#def filterBoxesWindow(boxes, ymin, ymax, xmin, xmax):
+#    """
+#        See what boxes are in the current tile given its limits
+#    """
+#    return [
+#        (px - xmin, py - ymin, w, h, cat)
+#        for (px, py, w, h, cat) in boxes
+#        if xmin <= px and px + w <= xmax and
+#           ymin <= py and py + h <= ymax
+#    ]
+
+def boxIntersectionArea(px, py, w, h, xmin, ymin, xmax, ymax):
+    inter_w = max(0, min(px + w, xmax) - max(px, xmin))
+    inter_h = max(0, min(py + h, ymax) - max(py, ymin))
+    return inter_w * inter_h, max(0, min(px + w, xmax) - max(px, xmin)), max(0, min(py + h, ymax) - max(py, ymin)), max(px, xmin), max(py, ymin)
+
 def filterBoxesWindow(boxes, ymin, ymax, xmin, xmax):
     """
         See what boxes are in the current tile given its limits
     """
-    return [
-        (px - xmin, py - ymin, w, h, cat)
-        for (px, py, w, h, cat) in boxes
-        if xmin <= px and px + w <= xmax and
-           ymin <= py and py + h <= ymax
-    ]
+    filtered = []
+    for px, py, w, h, cat in boxes:
+        inter_area, inter_w, inter_h, inter_xmin, inter_ymin = boxIntersectionArea(px, py, w, h, xmin, ymin, xmax, ymax)
+        if w * h > 0 and inter_area >= 0.5 * w * h:
+            filtered.append((inter_xmin - xmin, inter_ymin - ymin, inter_w, inter_h, cat))
+    return filtered
+
+
 
 def boxCoordsToFile(file,boxC):
     """
@@ -147,10 +166,89 @@ def prepareDataFolder(dataFolder,sites,outFolder,slice):
         sliceFolder(dataFolder,site,outputFolder, slice)
 
 
+def computeBBfromLI(labelIM):
+    """
+        Compute bounding boxes 
+        from the label image    
+    """
+    int_labelIM = labelIM.astype(np.int32)
+    slices = ndimage.find_objects(int_labelIM)
+    boxes = []
+
+    for label, slc in enumerate(slices, start=1):
+        if slc is None:
+            continue  # Label not present
+
+        y_start, y_stop = slc[0].start, slc[0].stop
+        x_start, x_stop = slc[1].start, slc[1].stop
+
+        px = x_start
+        py = y_start
+        w = x_stop - x_start
+        h = y_stop - y_start
+
+        boxes.append((px, py, w, h, 1)) # in this case, all labels are just "tree"
+
+    return boxes
+
+def prepareDataKoi(lIMfile, mosFile, outFolderRoot, trainPerc, slice, verbose = True):
+    """
+        Given a mosaic and 
+    """
+    labelIM = cv2.imread(lIMfile,cv2.IMREAD_UNCHANGED)
+    mosaic = read_Color_Image(mosFile)
+    boxes = computeBBfromLI(labelIM)
+
+    # because all labels are just "tree", we change the label image so it only contains 0 and 1
+    labelIM[labelIM != 0] = 1     
+
+    # create output folder if it does not exist
+    Path(outFolderRoot).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(outFolderRoot,"train")).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(outFolderRoot,"test")).mkdir(parents=True, exist_ok=True)
+
+    # slice the three things and output
+    wSize = (slice,slice)
+    count = 0
+    for (x, y, window) in sliding_window(mosaic, stepSize = int(slice*0.8), windowSize = wSize ):
+        # get mask window
+        if window.shape[:2] == (slice,slice) :
+            labelW = labelIM[y:y + wSize[1], x:x + wSize[0]]
+            boxesW = filterBoxesWindow(boxes,y,y + wSize[1], x,x + wSize[0])
+
+            if verbose: print(boxesW)
+
+            # here we should probably add cleanUpMaskBlackPixels and maybe do it for YOLO too (in buildtrainvalidation?)
+            if len(boxesW) > 0:
+                # store them both, doing a randomDraw to see if they go to training or testing
+                outFolder = os.path.join(outFolderRoot,"train") if randint(1,100) < trainPerc else os.path.join(outFolderRoot,"test")
+                if verbose: print("writing to "+str(os.path.join(outFolder,"Tile"+str(count)+".png")))
+                cv2.imwrite(os.path.join(outFolder,"Tile"+str(count)+".png"),window)
+                cv2.imwrite(os.path.join(outFolder,"Tile"+str(count)+"Labels.tif"),labelW)
+                boxCoordsToFile(os.path.join(outFolder,"Tile"+str(count)+"Boxes.txt"),boxesW)
+                count+=1
+            else:
+                if verbose: print("no boxes here")
+        else:
+            if verbose:  print("sliceFolder, non full window, ignoring"+str(window.shape))
+
 
 if __name__ == '__main__':
-    dataFolder = sys.argv[1]
-    outputFolder = sys.argv[2]
-    listOfSites = sys.argv[3:]
+    
+    prepare = "Sarah"
     slice = 1000
-    prepareDataFolder(dataFolder,listOfSites,outputFolder, slice)
+
+    if prepare == "Sarah":
+        print("Preparing with Sarah's format, change parameter to do it for Koiwainojo" \
+        "")
+        dataFolder = sys.argv[1]
+        outputFolder = sys.argv[2]
+        listOfSites = sys.argv[3:]
+        prepareDataFolder(dataFolder, listOfSites, outputFolder, slice)
+    elif prepare == "koi":
+        print("Preparing data for koiwainojo, change parameter to do it for Sarah's data")
+        labelImFile = sys.argv[1]
+        mosaicFile = sys.argv[2]
+        outputFolder = sys.argv[3]
+        trainPerc = int(sys.argv[4])
+        prepareDataKoi(labelImFile, mosaicFile, outputFolder, trainPerc, slice )

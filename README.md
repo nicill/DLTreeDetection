@@ -17,6 +17,8 @@ Sarah's Data
 1) Download the Data File, uncompress (from now on we suppose the uncompressed folder is ./Data/Data_Sarah/
 2) Transform into training and testing folders with the appropriate format (tiles cut with mosaic tile, image label tile and tiles boxes text file)
 
+	IMPORTANT: Open the file and check that the prepare variable in line 238 is set to "Sarah"     prepare = "Sarah"
+
 	Choose training/validation (ex: 1 2 3 4 5) and testing (ex 6 7) folders 
 	Build training folder: python dataHandling.py ./Data/Data_Sarah/ ./Data/SarahPrepared1to5/  1 2 3 4 5
 	Build testing folder: python dataHandling.py ./Data/Data_Sarah/ ./Data/SarahPrepared6to7/  6 7 
@@ -48,3 +50,20 @@ Sarah's Data
 
 	prepare a config file following configTDWS.ini, add your own paths, at this moment, basically you only need to adapt the "train" part	
 	
+	
+Koiwainojo Data:
+
+	At this moment I have been using the files I mentioned in slack, we should set this up properly with a dropbox link, but let's wait until we have the correct files
+	
+1) Download, uncompress data
+
+2) Transform into training and testing folders with the appropriate format (tiles cut with mosaic tile, image label tile and tiles boxes text file)
+
+	IMPORTANT: Open the file and check that the prepare variable in line 238 is set to "koi"     prepare = "koi"
+
+	python dataHandling.py ./Data/Sergi/Label_image_ROI.tif ./Data/Sergi/ROI_KoiwainoujoMosaic.tif ./Data/koiPrepared/ 90
+	
+	this will create two subfolders, train and test inside of the output folder (./DatakoiPrepared) divided randomly into training and testing
+	
+steps 3, 4 are the same as before but the config file needs to include a name for the dictionary file that does not reference any existing file (working example commmented out) 
+
