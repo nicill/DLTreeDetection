@@ -131,7 +131,6 @@ def cleanUpFolderBlackPixels(folder, sakuma1 = False):
     for dirpath, dnames, fnames in os.walk(folder):
         for f in fnames:
             if "KP" in f: #annotation file
-                print("fixing "+str(f))
                 # read mask and image, everyone is binary
                 mask = read_Binary_Mask(os.path.join(folder,f))
                 imageName = f[2:-6]+".tif_resultat_noiseRemoval.tif" if sakuma1 else f[2:-6]+f[-4:] # images and masks must have the same extension
@@ -398,7 +397,7 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
     """
     def get_original_image_size(filenames, folder_path):
         """
-        Computes the full size of the original image based on tile positions and dimensions using OpenCV.
+        Compute size of original image based on tiles (OpenCV).
 
         Args:
             filenames (list of str): List of filenames like 'x0y0.jpg', 'x200y150.png', etc.
@@ -410,20 +409,20 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
         max_right = 0
         max_bottom = 0
 
-        for fname in filenames:
+        for fname in filenames: # in this case filenames contains a list of tuples with the names of images, label images and box list text files
             # Extract x and y using regex
-            match = re.search(r'x(\d+)y(\d+)', fname)
+            match = re.search(r'x(\d+)y(\d+)', fname[0]) #first postion of the tuple contains image name
             if not match:
-                raise ValueError(f"Filename '{fname}' does not match 'x<num>y<num>' pattern.")
-            
+                raise ValueError(f"Filename '{fname[0]}' does not match 'x<num>y<num>' pattern.")
+
             x, y = int(match.group(1)), int(match.group(2))
 
             # Read image using OpenCV
-            image_path = os.path.join(folder_path, fname)
+            image_path = os.path.join(folder_path, fname[0])
             img = cv2.imread(image_path)
             if img is None:
                 raise FileNotFoundError(f"Could not read image: {image_path}")
-            
+
             tile_height, tile_width = img.shape[:2]
 
             # Compute max extent of the image
@@ -440,16 +439,18 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
     stitched_mask = np.ones((full_height, full_width), dtype=np.uint8)
     stitched_mask = stitched_mask*255
 
+    # list of boxes in the original image coordinates
+    boxCoords = []
 
-    for fname in TileList:
-        match = re.search(r'x(\d+)y(\d+)', fname)
+    for fname in TileList: # TileList contains a list of tuples with the names of images, label images and box list text files 
+        match = re.search(r'x(\d+)y(\d+)', fname[0])
         if not match:
-            raise ValueError(f"Filename '{fname}' does not contain valid 'x<num>y<num>' format.")
+            raise ValueError(f"Filename '{fname[0]}' does not contain valid 'x<num>y<num>' format.")
 
         x, y = int(match.group(1)), int(match.group(2))
-        image_path = os.path.join(predFolder, fname)
+        image_path = os.path.join(predFolder, fname[0]) # first element in the tuple contains the image name
         tile = cv2.imread(image_path)
-        tileMask = cv2.imread(os.path.join(predFolder, "PREDMASK"+fname),0)
+        tileMask = cv2.imread(os.path.join(predFolder, fname[1]),0)  # second element in the tuple contains the label image name
 
         if tile is None:
             raise FileNotFoundError(f"Could not read image: {image_path}")
@@ -459,13 +460,52 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
 
         # make sure to overlap all mask predictions
         stitched_maskAUX = np.ones((full_height, full_width), dtype=np.uint8)
-        stitched_maskAUX[y:y+h, x:x+w] = tileMask 
-        stitched_mask[ stitched_maskAUX == 0 ] = 0  
+        stitched_maskAUX[y:y+h, x:x+w] = tileMask
+        stitched_mask[ stitched_maskAUX == 0 ] = 0
         #stitched_mask[y:y+h, x:x+w] = tileMask
-    
-    # write to disk
+
+        # also read box coords
+        boxPredFile = os.path.join(predFolder, "BOXCOORDS"+imageN[:imageN.rfind(".")]+"x"+str(x)+"y"+str(y)+".txt") # third element in the tuple box list text file name but we have to use the name of the prediction file not the original box file
+        with open(boxPredFile) as f: 
+            for line in f.readlines():
+                c,px1,py1,px2,py2 = tuple(line.strip().split(" "))
+                newP1 = (int(float(px1) + float(x)), int(float(py1) + float(y)))
+                newP2 = (int(float(px2) + float(x)), int(float(py2) + float(y)))
+
+                boxCoords.append((c,str(newP1[0]),str(newP1[1]),str(newP2[0]),str(newP2[1])))
+
+        # now that we are here, we should create the stitched image of images with highlighted rectangle boxes
+
+    # write to disk (image, mask, bounding box file)
     cv2.imwrite(os.path.join(predFolder,"FULL",imageN),stitched_image )
     cv2.imwrite(os.path.join(predFolder,"FULL","PREDMASK"+imageN),stitched_mask )
+    boxCoordsToFile(os.path.join(predFolder,"FULL","BOXCOORDS"+imageN[:-4]+".txt"),boxCoords)
+    # also, make a pretty image of the original image with boxes and categories
+    cv2.imwrite(os.path.join(predFolder,"FULL","Pretty"+imageN), prettyImage(boxCoords,stitched_image) )
+
+def prettyImage(boxes, image, color = 125, thickness=4, font_scale=0.5, font_thickness=3):
+    """
+        Draw bounding box countours on image
+        box format is p1x,p1y,p2x,p2y
+    """
+    for tup in boxes:
+        category = tup[0]
+        px1, py1, px2, py2 = map(float, tup[1:])
+        top_left = (int(px1), int(py1))
+        bottom_right = (int(px2), int(py2))
+
+        # Draw rectangle
+        cv2.rectangle(image, top_left, bottom_right, color, thickness)
+
+        # Put label
+        label = str(category)
+        label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+        label_origin = (top_left[0], top_left[1] - 5 if top_left[1] - 5 > 0 else top_left[1] + label_size[1] + 5)
+
+        cv2.putText(image, label, label_origin, cv2.FONT_HERSHEY_SIMPLEX,
+                    font_scale, color, font_thickness, lineType=cv2.LINE_AA)
+
+    return image
 
 
 def maskFromBoxes(boxes, image_size):
@@ -567,6 +607,7 @@ def boxCoordsToFile(file,boxC):
     """
     def writeTuple(tup):
         c,px,py,w,h = tup
+        #print("writing "+str(c)+" "+str(px)+" "+str(py)+" "+str(w)+" "+str(h))
         f.write(str(c)+" "+str(px)+" "+str(py)+" "+str(w)+" "+str(h)+"\n")
 
     with open(file, 'a') as f:

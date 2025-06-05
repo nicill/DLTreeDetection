@@ -123,14 +123,13 @@ def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
     labelIm = buildGT(os.path.join(dataFolder,"S"+siteNumber))
     mosaic = read_Color_Image(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+".jpg"))
     boxes = readBB(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"BBoxes.txt"))
-    print("reading "+str(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"ROI.jpg")))
     ROI = read_Binary_Mask(os.path.join(dataFolder,"S"+siteNumber,"S"+siteNumber+"ROI.jpg"))
     # apply ROI (black out everything outside of the ROI the ROI is black on white so 0 is inside)
     mosaic[ROI!=0] = (0,0,0)
 
     # slice the three things and output
     wSize = (slice,slice)
-    count = 0
+    #count = 0
     for (x, y, window) in sliding_window(mosaic, stepSize = int(slice*0.8), windowSize = wSize ):
         # get mask window
         if window.shape[:2] == (slice,slice) :
@@ -142,11 +141,10 @@ def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
             # here we should probably add cleanUpMaskBlackPixels and maybe do it for YOLO too (in buildtrainvalidation?)
             if len(boxesW) > 0:
                 # store them both
-                if verbose: print("writing to "+str(os.path.join(outFolder,"Tile"+str(count)+"S"+siteNumber+".png")))
-                cv2.imwrite(os.path.join(outFolder,"Tile"+str(count)+"S"+siteNumber+".png"),window)
-                cv2.imwrite(os.path.join(outFolder,"Tile"+str(count)+"S"+siteNumber+"Labels.tif"),labelW)
-                boxCoordsToFile(os.path.join(outFolder,"Tile"+str(count)+"S"+siteNumber+"Boxes.txt"),boxesW)
-                count+=1
+                if verbose: print("writing to "+str(os.path.join(outFolder,"S"+siteNumber+"x"+str(x)+"y"+str(y)+".png")))
+                cv2.imwrite(os.path.join(outFolder,"S"+siteNumber+"x"+str(x)+"y"+str(y)+".png"),window)
+                cv2.imwrite(  os.path.join(outFolder,"S"+siteNumber+"x"+str(x)+"y"+str(y)+"Labels.tif") ,labelW)
+                boxCoordsToFile(os.path.join(outFolder,"S"+siteNumber+"x"+str(x)+"y"+str(y)+"Boxes.txt"),boxesW)
             else:
                 if verbose: print("no boxes here")
         else:

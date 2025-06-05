@@ -184,7 +184,7 @@ class TDDataset(Dataset):
         """
             Receive a folder, PRE SLICED!:
             Each piece of data is made up of three parts
-            1) an image of png format (the name of the image follows the convention TileXSY.png) where X is the tile number and X is the code of the original image the tile comes from
+            1) an image of png format (the name of the image follows the convention SAAxXyY.png) where SA is the site is the original image the tile comes from and x,y are the position of the tile in the image
             2) a label image of tif format (with the same name as the image but with Label at the end and tif format)
             3) a text file with the boxes in the image (same name as image but with Boxes at the end and txt format)
 
@@ -209,7 +209,7 @@ class TDDataset(Dataset):
                     imName = os.path.join(dataFolder,f)
                     labelName = os.path.join(dataFolder,f[:-4]+"Labels.tif")
                     boxFileName = os.path.join(dataFolder,f[:-4]+"Boxes.txt")
-                    siteName = f[f.rfind("S"):-4]
+                    siteName = f[f.rfind("S"):f.find("x")]
                     if verbose: print([imName,labelName,boxFileName,siteName])
                     self.imageNameList.append(imName)
                     self.labelNameList.append(labelName)
