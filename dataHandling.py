@@ -33,14 +33,18 @@ def simplifyOneSite(dataF, listOfClasses, outFolder):
     # build label image
     labelIm = buildGT( dataF )
 
-
     # read the mosaic
     mosaic = read_Color_Image(os.path.join(dataF,siteName+".jpg"))
     
     # put the pixels corresponding to classes not kept to black
-    for l in np.unique(labelIm):
+    for l in np.delete(np.unique(labelIm),0):
         if l not in listOfClasses: 
             mosaic[ labelIm == l ] = (0,0,0)
+        else:
+            # read and store binary mask
+            spName = "0"+str(l) if l < 10 else str(l)
+            newSPName = "0"+str(classNameDict[l]) if classNameDict[l] < 10 else str(classNameDict[l])
+            shutil.copyfile( os.path.join(dataF,siteName+"S"+spName+".jpg"), os.path.join(outFolder,siteName+"S"+newSPName+".jpg"))
 
     # store the result
     cv2.imwrite(os.path.join(outFolder,siteName+".jpg"), mosaic)
@@ -50,6 +54,9 @@ def simplifyOneSite(dataF, listOfClasses, outFolder):
     newboxes = [ (b[0],b[1],b[2],b[3],classNameDict[b[4]]) for b in boxes if b[4] in listOfClasses   ]
 
     boxCoordsToFile( os.path.join(outFolder, siteName+"BBoxes.txt"), newboxes)
+
+    # also copy roi file 
+    shutil.copyfile( os.path.join( dataF,siteName+"ROI.jpg") , os.path.join( outFolder,siteName+"ROI.jpg") )
 
 def simplifyClasses(dataFolder, listOfClasses, outFolder):
     """
@@ -273,24 +280,31 @@ def prepareDataKoi(lIMfile, mosFile, outFolderRoot, trainPerc, slice, verbose = 
 
 if __name__ == '__main__':
     
-    # call this function inputFolder, outputFolder, list of classes
-    simplifyClasses(sys.argv[1], sys.argv[3:], sys.argv[2])
-    sys.exit(1)
-    
+    simplifyData = True
+    prepareData = False
     prepare = "Sarah"
-    slice = 1000
 
-    if prepare == "Sarah":
-        print("Preparing with Sarah's format, change parameter to do it for Koiwainojo" \
-        "")
-        dataFolder = sys.argv[1]
-        outputFolder = sys.argv[2]
-        listOfSites = sys.argv[3:]
-        prepareDataFolder(dataFolder, listOfSites, outputFolder, slice)
-    elif prepare == "koi":
-        print("Preparing data for koiwainojo, change parameter to do it for Sarah's data")
-        labelImFile = sys.argv[1]
-        mosaicFile = sys.argv[2]
-        outputFolder = sys.argv[3]
-        trainPerc = int(sys.argv[4])
-        prepareDataKoi(labelImFile, mosaicFile, outputFolder, trainPerc, slice )
+    if simplifyData and prepareData: raise Exception("data handling, wrong use of file, only one function should be chosen at a time")
+
+    if simplifyData:
+        # call this function inputFolder, outputFolder, list of classes
+        simplifyClasses(sys.argv[1], sys.argv[3:], sys.argv[2])
+    
+    if prepareData:
+
+        slice = 1000
+
+        if prepare == "Sarah":
+            print("Preparing with Sarah's format, change parameter to do it for Koiwainojo" \
+            "")
+            dataFolder = sys.argv[1]
+            outputFolder = sys.argv[2]
+            listOfSites = sys.argv[3:]
+            prepareDataFolder(dataFolder, listOfSites, outputFolder, slice)
+        elif prepare == "koi":
+            print("Preparing data for koiwainojo, change parameter to do it for Sarah's data")
+            labelImFile = sys.argv[1]
+            mosaicFile = sys.argv[2]
+            outputFolder = sys.argv[3]
+            trainPerc = int(sys.argv[4])
+            prepareDataKoi(labelImFile, mosaicFile, outputFolder, trainPerc, slice )

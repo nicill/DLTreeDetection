@@ -14,11 +14,23 @@ Repository fo Detection of trees in different Datasets using Deep Learning netwo
 
 Sarah's Data
 
+**Before you start** The dataHandling file performs two tasks at the moment, 1) simplifies the problem given a list of classes (see the file for details) and 2) prepares the data to be read by the deep learning networks. The file should only perform **one** of hte two functions at any given time. Which one it performs is decided by two boolean variables after the "ifmain" clause. Make sure to have the appropiate one on.
+
+
 1) Download the Data File, uncompress (from now on we suppose the uncompressed folder is ./Data/Data_Sarah/
+
+1.5) If you need to simplify the problem so not all classes are considered and pixels from classes not considered are put to black in the mosaic, make sure that the dataHandling.py shows the following configuration:
+    simplifyData = True
+    prepareData = False
+    
 2) Transform into training and testing folders with the appropriate format (tiles cut with mosaic tile, image label tile and tiles boxes text file)
 
-	IMPORTANT: Open the file and check that the prepare variable in line 238 is set to "Sarah"     prepare = "Sarah"
 
+	IMPORTANT: Open the datahandling.py file and check that, after the "ifmain" clause, the following variables are set as follows:
+	simplifyData = False
+   	prepareData = True
+    	prepare = "Sarah"
+	
 	Choose training/validation (ex: 1 2 3 4 5) and testing (ex 6 7) folders 
 	Build training folder: python dataHandling.py ./Data/Data_Sarah/ ./Data/SarahPrepared1to5/  1 2 3 4 5
 	Build testing folder: python dataHandling.py ./Data/Data_Sarah/ ./Data/SarahPrepared6to7/  6 7 
@@ -59,7 +71,10 @@ Koiwainojo Data:
 
 2) Transform into training and testing folders with the appropriate format (tiles cut with mosaic tile, image label tile and tiles boxes text file)
 
-	IMPORTANT: Open the file and check that the prepare variable in line 238 is set to "koi"     prepare = "koi"
+	IMPORTANT: Open the datahandling.py file and check that, after the "ifmain" clause, the following variables are set as follows:
+	simplifyData = False
+   	prepareData = True
+    	prepare = "koi"
 
 	python dataHandling.py ./Data/Sergi/Label_image_ROI.tif ./Data/Sergi/ROI_KoiwainoujoMosaic.tif ./Data/koiPrepared/ 90
 	
