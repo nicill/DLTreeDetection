@@ -1,0 +1,5 @@
+Data
+*.pth
+outVisual*
+predictND
+__pycache__

@@ -14,6 +14,57 @@ import re
 import numpy as np
 from scipy import ndimage
 
+def simplifyOneSite(dataF, listOfClasses, outFolder):
+    """
+    receive the name of a folder containing a site
+    and a list of classes to keep
+    put all pixels in other classes to black, 
+    rename the classes remaining to match the order in the list
+    save the result in the provided outFolder 
+    """
+    # make sure the classes are integers
+    listOfClasses = list(map(int, listOfClasses))
+
+    # retrieve site name 
+    siteName = os.path.basename(dataF)
+
+    classNameDict = { listOfClasses[i]: i + 1 for i in range(len(listOfClasses))  } # to renumber classes starting at 1
+
+    # build label image
+    labelIm = buildGT( dataF )
+
+
+    # read the mosaic
+    mosaic = read_Color_Image(os.path.join(dataF,siteName+".jpg"))
+    
+    # put the pixels corresponding to classes not kept to black
+    for l in np.unique(labelIm):
+        if l not in listOfClasses: 
+            mosaic[ labelIm == l ] = (0,0,0)
+
+    # store the result
+    cv2.imwrite(os.path.join(outFolder,siteName+".jpg"), mosaic)
+        
+    # read the file with the boxes
+    boxes = readBB(os.path.join(dataF,siteName+"BBoxes.txt"))
+    newboxes = [ (b[0],b[1],b[2],b[3],classNameDict[b[4]]) for b in boxes if b[4] in listOfClasses   ]
+
+    boxCoordsToFile( os.path.join(outFolder, siteName+"BBoxes.txt"), newboxes)
+
+def simplifyClasses(dataFolder, listOfClasses, outFolder):
+    """
+        Receive a data folder with one folder for every site
+        a list of classes to keep and an output folder
+        simplify the mosaics and boxlists for all folders containing subsites 
+        and store the result in outFolder
+    """
+    # Get the list of files in the folder.
+    folderList = os.listdir(dataFolder)
+    for site in folderList:
+        # make output folder if it did not exist
+        Path(os.path.join(outFolder,site)).mkdir(parents=True, exist_ok=True)
+        simplifyOneSite(os.path.join(dataFolder,site), listOfClasses, os.path.join(outFolder,site))
+
 
 def isSpeciesMask(file,sn):
     """
@@ -69,17 +120,6 @@ def readBB(file_path):
     with open(file_path) as f:
         return list(map(lambda l: tuple(map(int, l.split())), f))
 
-
-#def filterBoxesWindow(boxes, ymin, ymax, xmin, xmax):
-#    """
-#        See what boxes are in the current tile given its limits
-#    """
-#    return [
-#        (px - xmin, py - ymin, w, h, cat)
-#        for (px, py, w, h, cat) in boxes
-#        if xmin <= px and px + w <= xmax and
-#           ymin <= py and py + h <= ymax
-#    ]
 
 def boxIntersectionArea(px, py, w, h, xmin, ymin, xmax, ymax):
     inter_w = max(0, min(px + w, xmax) - max(px, xmin))
@@ -232,6 +272,10 @@ def prepareDataKoi(lIMfile, mosFile, outFolderRoot, trainPerc, slice, verbose = 
 
 
 if __name__ == '__main__':
+    
+    # call this function inputFolder, outputFolder, list of classes
+    simplifyClasses(sys.argv[1], sys.argv[3:], sys.argv[2])
+    sys.exit(1)
     
     prepare = "Sarah"
     slice = 1000
