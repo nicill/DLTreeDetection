@@ -23,6 +23,12 @@ Sarah's Data
     simplifyData = True
     prepareData = False
     
+example call, to only consider classes 2,3,5 and 11
+    
+    python dataHandling.py ./Data/Data_Sarah/ ./Data/Data23511/ 2 3 5 11
+
+take into account that the classes will be renamed according to the order they are given in. in the new dataset class 2 will be "1", class 3 will be "2", class 5 will be "3" and class 11 will be "4"
+
 2) Transform into training and testing folders with the appropriate format (tiles cut with mosaic tile, image label tile and tiles boxes text file)
 
 
