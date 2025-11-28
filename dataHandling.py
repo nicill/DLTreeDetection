@@ -185,7 +185,6 @@ def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
 
             if verbose: print(boxesW)
 
-            # here we should probably add cleanUpMaskBlackPixels and maybe do it for YOLO too (in buildtrainvalidation?)
             if len(boxesW) > 0:
                 # store them both
                 if verbose: print("writing to "+str(os.path.join(outFolder,"S"+siteNumber+"x"+str(x)+"y"+str(y)+".png")))
