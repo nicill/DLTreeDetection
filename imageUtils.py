@@ -105,8 +105,8 @@ def cleanUpMaskBlackPixels(mask, im, areaTH = 100):
     """
     Receive a Mask with the position of kanji
     and the original image (binarized)
-    erase regions that have fewer black pixels 
-    in the original image than a given threshold 
+    erase regions that have fewer black pixels
+    in the original image than a given threshold
     """
     numLabels, labelIm, stats, centroids = cv2.connectedComponentsWithStats(255-mask)
 
@@ -114,7 +114,7 @@ def cleanUpMaskBlackPixels(mask, im, areaTH = 100):
     for j in range(1,len(np.unique(labelIm))):
         #aux = im.copy() # copy image so we do not break anything
 
-        blackInComponent = np.sum((labelIm == j ) & (im < 100 )) # count pixels in the mask that are black in the original image 
+        blackInComponent = np.sum((labelIm == j ) & (im < 100 )) # count pixels in the mask that are black in the original image
         if blackInComponent < areaTH:
             mask[labelIm == j] = 255
             #print("erasing "+str(j))
@@ -122,12 +122,12 @@ def cleanUpMaskBlackPixels(mask, im, areaTH = 100):
 
 def cleanUpFolderBlackPixels(folder, sakuma1 = False):
     """
-        traverse a folder with particular naming conventions 
+        traverse a folder with particular naming conventions
         ( annotations start with KP)
         and clean up the masks, OVERWRITES!
-        avoids subfolders   
+        avoids subfolders
         the sakuma 1 flag is to process the older file naming
-    """    
+    """
     for dirpath, dnames, fnames in os.walk(folder):
         for f in fnames:
             if "KP" in f: #annotation file
@@ -135,11 +135,11 @@ def cleanUpFolderBlackPixels(folder, sakuma1 = False):
                 mask = read_Binary_Mask(os.path.join(folder,f))
                 imageName = f[2:-6]+".tif_resultat_noiseRemoval.tif" if sakuma1 else f[2:-6]+f[-4:] # images and masks must have the same extension
                 im = read_Binary_Mask(os.path.join(folder,imageName)) if sakuma1 else color_to_gray(read_Color_Image(os.path.join(folder,imageName)) )
-                cv2.imwrite(os.path.join(folder,f),cleanUpMaskBlackPixels( mask , im , 100)) 
+                cv2.imwrite(os.path.join(folder,f),cleanUpMaskBlackPixels( mask , im , 100))
         break # we do not want to chek subfolders
 
 
-        
+
 def recoupMasks(masks, weights, th):
     """
     Function to combine a list of
@@ -221,7 +221,7 @@ def eraseNonFatRegions(im,fatness):
 
 def precRecall(dScore, invScore):
     """
-        (Receive two list, the first with tuples of boxes found and total boxes 
+        (Receive two list, the first with tuples of boxes found and total boxes
         in the GT found in the prediction, dScore and viceversa, invScore in that order)
     """
     gtBoxes = sum([ x[1] for x in dScore ])
@@ -245,7 +245,7 @@ def boxesFound(im1, im2, percentage = True, verbose = False):
         """
         inner function to count how
         many boxes in one image
-        are also in the other 
+        are also in the other
         (regarding if the centroid is black)
         """
         nonlocal im2
@@ -274,26 +274,26 @@ def boxesFound(im1, im2, percentage = True, verbose = False):
 def boxListEvaluation(bPred, bGT,th = 0.5):
     """
         receives two lists of boxes (predicted and ground truth)
-        in x1,y1,x2,y2 format and outputs precision, recall,
+        in x1,y1,x2,y2 format and outputs number of TP, FP, FN
         in terms of overlap percentage
     """
     def isTrueP(b,gtB):
         """
             goes over all boxes in the ground truth and checks
             if they overlap with the current box more than the threshold
-            store them in a dictionary 
+            store them in a dictionary
         """
         for boxGT in gtB:
             op = iou(b,boxGT)
             #print("overlap percentage "+str(op))
-            if op>th and str(b) not in tpDict:
-                tpDict[str(b)] = True
-                
+            if op>th and str(boxGT) not in tpDict:
+                tpDict[str(boxGT)] = True
+
 
     def iou(b1, b2):
         """
         Compute IoU between two boxes.
-        
+
         b1: list or tuple [x1_min, y1_min, x1_max, y1_max]
         b2: list or tuple [x2_min, y2_min, x2_max, y2_max]
         """
@@ -322,26 +322,27 @@ def boxListEvaluation(bPred, bGT,th = 0.5):
 
         return inter_area / union_area
 
+    """
+    print("predicted boxes \n")
+    print(bPred)
+
+    print("\nGT boxes!!!!\n")
+    print(bGT)
+    """
     # Dictionary that contains the boxes in the ground truth that have been overlapped by a predicted box
     tpDict = {}
-    #num_tp = 0
     for box in bPred:
         isTrueP(box,bGT) # this function already updates the tpDict
-    num_tp = len(tpDict.keys())    
-
-    tpDict = {}
-    for box in bGT:
-        isTrueP(box,bPred) # this function already updates the tpDict
-    num_tpRECALL = len(tpDict.keys())    
-
+    TP = len(tpDict.keys()) # we consider the number of true positives to be the number of ground truth boxes caught by predictions, any box caught more than once is only counted once
+    FP = len(bPred) - TP # We consider a false positive to be either a box that misses the ground truth or repeats it
+    FN = len(bGT) - TP # any missed box is a false negative
 
     #print(tpDict)
     #print("found TP "+str(num_tp)+" of predictions "+str(len(bPred))+" and real objects "+str(len(bGT)))
-    recall = num_tpRECALL/len(bGT) if len(bGT) > 0 else 0
-    precision = num_tp/len(bPred) if len(bPred) > 0 else 0
-    #print("returning "+str(precision)+" "+str(recall))
-
-    return precision,recall
+    #recall = num_tpRECALL/len(bGT) if len(bGT) > 0 else 0
+    #precision = num_tp/len(bPred) if len(bPred) > 0 else 0
+    #print("boxlistEval found "+str(TP)+" missed "+str(FN))
+    return TP, FP, FN
 
 def boxListEvaluationCentroids(bPred, bGT):
     """
@@ -354,7 +355,7 @@ def boxListEvaluationCentroids(bPred, bGT):
             returns the center of a box in x1,y1,x2,y2 format
         """
         return b[0]+(b[2]-b[0])/2,b[1]+(b[3]-b[1])/2
-    
+
     def inside(b,p):
         """
         Check if p is inside box b
@@ -371,7 +372,7 @@ def boxListEvaluationCentroids(bPred, bGT):
         for boxGT in gtB:
             if inside(boxGT,c) and str(boxGT) not in tpDict:
                     tpDict[str(boxGT)] = True
-                
+
     # Dictionary that contains the boxes in the ground truth that have been overlapped by a predicted box
     tpDict = {}
     #num_tp = 0
@@ -380,7 +381,7 @@ def boxListEvaluationCentroids(bPred, bGT):
         #isTP = isTrueP(box,bGT)
         #if isTP: num_tp+=1
         isTrueP(box,bGT)
-    num_tp = len(tpDict.keys())    
+    num_tp = len(tpDict.keys())
 
     #print(tpDict)
     #print("found TP "+str(num_tp)+" of predictions "+str(len(bPred))+" and real objects "+str(len(bGT)))
@@ -442,7 +443,8 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
     # list of boxes in the original image coordinates
     boxCoords = []
 
-    for fname in TileList: # TileList contains a list of tuples with the names of images, label images and box list text files 
+    for fname in TileList: # TileList contains a list of tuples with the names of images, label images and box list text files
+
         match = re.search(r'x(\d+)y(\d+)', fname[0])
         if not match:
             raise ValueError(f"Filename '{fname[0]}' does not contain valid 'x<num>y<num>' format.")
@@ -465,8 +467,8 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
         #stitched_mask[y:y+h, x:x+w] = tileMask
 
         # also read box coords
-        boxPredFile = os.path.join(predFolder, "BOXCOORDS"+imageN[:imageN.rfind(".")]+"x"+str(x)+"y"+str(y)+".txt") # third element in the tuple box list text file name but we have to use the name of the prediction file not the original box file
-        with open(boxPredFile) as f: 
+        boxPredFile = os.path.join(predFolder, "BOXCOORDS"+imageN+"x"+str(x)+"y"+str(y)+".txt") # here we are reading from the tile predicted box file to create a full predicted box file
+        with open(boxPredFile) as f:
             for line in f.readlines():
                 c,px1,py1,px2,py2 = tuple(line.strip().split(" "))
                 newP1 = (int(float(px1) + float(x)), int(float(py1) + float(y)))
@@ -474,14 +476,12 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
 
                 boxCoords.append((c,str(newP1[0]),str(newP1[1]),str(newP2[0]),str(newP2[1])))
 
-        # now that we are here, we should create the stitched image of images with highlighted rectangle boxes
-
     # write to disk (image, mask, bounding box file)
-    cv2.imwrite(os.path.join(predFolder,"FULL",imageN),stitched_image )
-    cv2.imwrite(os.path.join(predFolder,"FULL","PREDMASK"+imageN),stitched_mask )
-    boxCoordsToFile(os.path.join(predFolder,"FULL","BOXCOORDS"+imageN[:-4]+".txt"),boxCoords)
+    cv2.imwrite(os.path.join(predFolder,"FULL",imageN+".png"),stitched_image )
+    cv2.imwrite(os.path.join(predFolder,"FULL","PREDMASK"+imageN+".png"),stitched_mask )
+    boxCoordsToFile(os.path.join(predFolder,"FULL","BOXCOORDS"+imageN+".txt"),boxCoords)
     # also, make a pretty image of the original image with boxes and categories
-    cv2.imwrite(os.path.join(predFolder,"FULL","Pretty"+imageN), prettyImage(boxCoords,stitched_image) )
+    cv2.imwrite(os.path.join(predFolder,"FULL","Pretty"+imageN+".png"), prettyImage(boxCoords,stitched_image) )
 
 def prettyImage(boxes, image, color = 125, thickness=4, font_scale=0.5, font_thickness=3):
     """
@@ -579,6 +579,13 @@ def boxesFromMask(img, cl = 0, yoloFormat = True):
                 out.append((cl,x1,y1,x2,y2))
     return out
 
+def borderbox(box, width, height, border_fraction=0.05):
+    """
+    Return True if a box touches the border region defined by border_fraction.
+    """
+    bx, by = border_fraction * width, border_fraction * height
+    return (box[0] <= bx) or (box[2] >= width - bx) or (box[1] <= by) or (box[3] >= height - by)
+
 def sliceAndBox(im,mask,slice):
     """
     Given image and mask, slice them
@@ -606,12 +613,37 @@ def boxCoordsToFile(file,boxC):
 
     """
     def writeTuple(tup):
-        c,px,py,w,h = tup
+        px,py,w,h,c = tup
         #print("writing "+str(c)+" "+str(px)+" "+str(py)+" "+str(w)+" "+str(h))
         f.write(str(c)+" "+str(px)+" "+str(py)+" "+str(w)+" "+str(h)+"\n")
 
     with open(file, 'a') as f:
         list(map( writeTuple, boxC))
+
+def fileToBoxCoords(file, returnCat=False, yoloToXYXY=False, imgSize=None):
+    """
+        Reads bounding boxes from a file.
+        If returnCat=True: returns (c, px, py, w, h) else (px, py, w, h)
+        the YOLOToXYXY thing changes from the annoying yolo format to something normal
+        but it needs the image size
+    """
+    if yoloToXYXY and not imgSize:
+        raise ValueError("imgSize=(w, h) required if yoloToXYXY=True")
+
+    w_img, h_img = imgSize if imgSize else (1, 1)
+
+    with open(file, 'r') as f:
+        boxes = []
+        for line in f:
+            if not line.strip():
+                continue
+            vals = list(map(float, line.strip().split()))
+            c, cx, cy, w, h = vals if returnCat else (None, *vals[1:])
+            cx, cy, w, h = cx * w_img, cy * h_img, w * w_img, h * h_img if yoloToXYXY else (cx, cy, w, h)
+            box = (cx - w/2, cy - h/2, cx + w/2, cy + h/2) if yoloToXYXY else (cx, cy, w, h)
+            boxes.append((int(c), *box) if returnCat else box)
+    return boxes
+
 
 if __name__ == "__main__":
     #color = True
@@ -620,7 +652,7 @@ if __name__ == "__main__":
     # single image clean up small regions
     #mask = read_Binary_Mask(sys.argv[1])
     #im = color_to_gray(read_Color_Image(sys.argv[2]))
-    #cv2.imwrite(sys.argv[3],cleanUpMaskBlackPixels( mask , im , 100)) 
+    #cv2.imwrite(sys.argv[3],cleanUpMaskBlackPixels( mask , im , 100))
 
     # folder clean up black pixels, careful as it overwrites.
     cleanUpFolderBlackPixels(sys.argv[1], sakuma1 = True)

@@ -14,8 +14,7 @@ import torch
 from train import collate_fn
 from imageUtils import (
 boxListEvaluation, boxListEvaluationCentroids, boxesFound, precRecall, maskFromBoxes,
-rebuildImageFromTiles, boxCoordsToFile, filter_boxes_by_overlap_and_area_distance,
-fillHolesInGrid, borderbox, fileToBoxCoords
+rebuildImageFromTiles, boxCoordsToFile, borderbox, fileToBoxCoords
 )
 
 from torchvision.transforms.functional import to_pil_image
@@ -178,39 +177,39 @@ def predict_new_Set_yolo(conf):
 
 def predict_yolo(conf, prefix = 'combined_data_'):
 
-    testPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"images")
-    boxPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"labels")
+    #testPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"images")
+    #boxPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"labels")
+    testPath = os.path.join(conf["Test_dir"],"images")
+    boxPath = os.path.join(conf["Test_dir"],"labels")
     testImageList = testFileList(testPath)
     predict_dir = conf["Pred_dir"]
 
-    #print(testPath)
+    print(testPath)
     #create predictions dir if it does not exist
     Path(predict_dir).mkdir(parents=True, exist_ok=True)
     dScore = []
     invScore = []
     totalTP, totalFP, totalFN = 0, 0, 0
-    
+
     # Use the prefix parameter directly
     currentmodel = prefix
-    
+
     # Use the same key that train_YOLO uses
     train_res_key = "Train_res" if "Train_res" in conf else "trainResFolder"
     modelpath = os.path.join(conf[train_res_key], "detect", currentmodel, "weights", "best.pt")
     print(f"predict_yolo: Loading model from {modelpath}")
-    
+
     # Verify model exists
     if not Path(modelpath).exists():
         raise FileNotFoundError(f"Model not found at: {modelpath}")
-    
+
     detectionModel = AutoDetectionModel.from_pretrained(
-        model_type='yolov8', 
-        model_path=modelpath, 
+        model_type='yolov8',
+        model_path=modelpath,
         device=0
     )
 
     for imPath in testImageList:
-
-
         image = cv2.imread(imPath)
         #gtBoxes = fileToBoxCoords(os.path.join(boxPath,os.path.basename(imPath)[:-4]+".txt"),returnCat = False)
         gtBoxes = fileToBoxCoords(os.path.join(boxPath,os.path.basename(imPath)[:-4]+".txt"), returnCat = False, yoloToXYXY=True, imgSize=(image.shape[1], image.shape[0]))
@@ -254,7 +253,6 @@ def predict_yolo(conf, prefix = 'combined_data_'):
             ignoreCount+=1
         """
 
-
         visualize_object_predictions(
             image=np.ascontiguousarray(result.image),
             object_prediction_list=result.object_prediction_list,
@@ -284,11 +282,11 @@ def predict_yolo(conf, prefix = 'combined_data_'):
 
 
 @torch.no_grad()
-def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5, 
+def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5,
                  predFolder=None, origFolder=None, max_detections=100):
     """
     DETR inference with proper coordinate transformation.
-    
+
     Key insight: DetrImageProcessor resizes maintaining aspect ratio.
     - If target size is 800, shortest edge becomes 800
     - Normalized coordinates are relative to the RESIZED image
@@ -325,9 +323,9 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
 
     with torch.no_grad():
         for ind, (images, targets) in enumerate(data_loader):
-            
+
             imageName = dataset_test.imageNameList[ind].split(os.sep)[-1]
-            
+
             # Get original image as numpy array
             try:
                 imToStore = np.ascontiguousarray(images[0].permute(1, 2, 0).cpu().numpy())
@@ -345,7 +343,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             img_for_processor = np.array(imToStore) if not isinstance(imToStore, np.ndarray) else imToStore
             encoding = processor(images=img_for_processor, return_tensors="pt", do_rescale=True).to(device)
             pixel_values = encoding["pixel_values"]
-            
+
             # Get processed dimensions
             batch_size, channels, proc_height, proc_width = pixel_values.shape
 
@@ -355,11 +353,11 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             # Extract predictions
             logits = outputs.logits[0]  # [num_queries, num_classes+1]
             boxes = outputs.pred_boxes[0]  # [num_queries, 4] in normalized cxcywh
-            
+
             # Convert to probabilities
             # For single-class: logits is [num_queries, 2] where dim=0 is object, dim=1 is no-object
             probs = logits.softmax(-1)
-            
+
             # Get probability of object class (not no-object)
             # For num_labels=1, index 0 is the object class
             scores = probs[:, 0]  # Probability of being an object (class 0)
@@ -379,7 +377,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
                 print(f"Original tile (W×H): {orig_width}×{orig_height}")
                 print(f"Processed (W×H): {proc_width}×{proc_height}")
                 print(f"Predictions above threshold ({predConfidence}): {keep.sum().item()} / {len(keep)}")
-                
+
                 if len(boxes) > 0:
                     print(f"\nFirst 3 predictions (normalized cxcywh):")
                     for i, (box, score, label) in enumerate(zip(boxes[:3], scores[:3], labels[:3])):
@@ -392,19 +390,19 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             boxes_norm[:, 1] = boxes[:, 1] - boxes[:, 3] / 2  # y1 = cy - h/2
             boxes_norm[:, 2] = boxes[:, 0] + boxes[:, 2] / 2  # x2 = cx + w/2
             boxes_norm[:, 3] = boxes[:, 1] + boxes[:, 3] / 2  # y2 = cy + h/2
-            
+
             # Step 2: Denormalize to processed image coordinates
             boxes_proc = torch.zeros_like(boxes_norm)
             boxes_proc[:, 0] = boxes_norm[:, 0] * proc_width
             boxes_proc[:, 1] = boxes_norm[:, 1] * proc_height
             boxes_proc[:, 2] = boxes_norm[:, 2] * proc_width
             boxes_proc[:, 3] = boxes_norm[:, 3] * proc_height
-            
+
             # Step 3: Scale to original image coordinates
             # The processor maintains aspect ratio, so we need to figure out the scaling
             scale_x = orig_width / proc_width
             scale_y = orig_height / proc_height
-            
+
             boxes_orig = torch.zeros_like(boxes_proc)
             boxes_orig[:, 0] = boxes_proc[:, 0] * scale_x
             boxes_orig[:, 1] = boxes_proc[:, 1] * scale_y
@@ -431,7 +429,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             widths = boxes_orig[:, 2] - boxes_orig[:, 0]
             heights = boxes_orig[:, 3] - boxes_orig[:, 1]
             valid = (widths > 1) & (heights > 1)
-            
+
             boxes_orig = boxes_orig[valid]
             labels = labels[valid]
             scores = scores[valid]
@@ -445,7 +443,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
                 boxes_orig = boxes_orig[keep_nms]
                 labels = labels[keep_nms]
                 scores = scores[keep_nms]
-            
+
             # Limit number of detections after NMS
             if len(boxes_orig) > max_detections:
                 topk = torch.topk(scores, max_detections)
@@ -456,7 +454,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             filtered_boxes = boxes_orig.to(cpu_device)
             filtered_labels = labels.to(cpu_device)
             filtered_scores = scores.to(cpu_device)
-            
+
             if ind < 5:
                 print(f"After NMS: {len(filtered_boxes)} predictions")
 
@@ -468,7 +466,7 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
                     x1, y1 = float(bx[0]), float(bx[1])
                     x2, y2 = x1 + float(bx[2]), y1 + float(bx[3])
                     tile_gt_boxes.append([x1, y1, x2, y2])
-            
+
             if ind < 5:
                 if len(tile_gt_boxes) > 0:
                     print(f"\nGround truth (original tile xyxy):")
@@ -527,7 +525,8 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
 
     # Rebuild full images/masks
     for imageN, TileList in dataset_test.getSliceFileInfo().items():
-        rebuildImageFromTiles(imageN, TileList, predFolder, origFolder)
+        #rebuildImageFromTiles(imageN, TileList, predFolder, origFolder)
+        rebuildImageFromTiles(imageN, TileList, predFolder)
 
     torch.set_num_threads(n_threads)
 
@@ -557,24 +556,24 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             prec, rec)
 
 
-def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None, 
-                                  predConfidence=0.5, predFolder=None, origFolder=None, 
+def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None,
+                                  predConfidence=0.5, predFolder=None, origFolder=None,
                                   max_detections=100, nms_threshold=0.5):
     """
     Fixed prediction for Deformable DETR
     """
-    
+
     print("Starting Deformable DETR prediction")
-    
+
     if device is None:
         device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-    
+
     # Add diagnostic for first batch
     for ind in range(min(1, len(dataset_test))):
         # Get data
         image_data, target = dataset_test[ind]
         imageName = dataset_test.imageNameList[ind].split(os.sep)[-1]
-        
+
         # Convert to proper format
         if isinstance(image_data, torch.Tensor):
             if image_data.shape[0] == 3:  # (C, H, W)
@@ -583,26 +582,26 @@ def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None,
                 imToStore = image_data.cpu().numpy()
         else:
             imToStore = np.array(image_data)
-        
+
         # Ensure uint8
         if imToStore.dtype != np.uint8:
             if imToStore.max() <= 1.0:
                 imToStore = (imToStore * 255).astype(np.uint8)
             else:
                 imToStore = imToStore.astype(np.uint8)
-        
+
         orig_height, orig_width = imToStore.shape[:2]
-        
+
         # CRITICAL FIX: Convert to PIL Image for the processor
         pil_image = Image.fromarray(imToStore)
-        
+
         # Process - pass PIL Image, not numpy array
         encoding = processor(images=pil_image, return_tensors="pt", do_rescale=True).to(device)
         pixel_values = encoding["pixel_values"]
-        
+
         # Forward pass
         outputs = model(pixel_values=pixel_values)
-        
+
         print("\n" + "="*70)
         print("DEFORMABLE DETR OUTPUT DIAGNOSTIC")
         print("="*70)
@@ -612,21 +611,21 @@ def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None,
         print(f"Output keys: {outputs.keys()}")
         print(f"Logits shape: {outputs.logits.shape}")
         print(f"Pred boxes shape: {outputs.pred_boxes.shape}")
-        
+
         # Check logits values
         logits = outputs.logits[0]
         print(f"Logits min/max: [{logits.min().item():.4f}, {logits.max().item():.4f}]")
-        
+
         # Check probabilities
         probs = logits.softmax(-1)
         print(f"Probs shape: {probs.shape}")
         print(f"Num classes in output: {probs.shape[-1]}")
-        
+
         # For single-class detection with num_labels=1:
         # probs should be shape [num_queries, 2] where:
         # - probs[:, 0] = probability of object (class 0)
         # - probs[:, 1] = probability of no-object
-        
+
         if probs.shape[-1] == 2:
             # Correct: single class + no-object
             scores_class0 = probs[:, 0]
@@ -642,17 +641,17 @@ def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None,
             # Multi-class (shouldn't happen with num_labels=1)
             print(f"WARNING: Expected 2 classes (object/no-object) but got {probs.shape[-1]}")
             scores_class0 = probs[:, 0]
-        
+
         print(f"Class 0 scores: min={scores_class0.min().item():.4f}, max={scores_class0.max().item():.4f}")
         print(f"Predictions with score>0.5: {(scores_class0 > 0.5).sum().item()}")
         print(f"Predictions with score>0.9: {(scores_class0 > 0.9).sum().item()}")
         print(f"Predictions with score>0.99: {(scores_class0 > 0.99).sum().item()}")
-        
+
         # Check predicted boxes
         boxes = outputs.pred_boxes[0]
         print(f"Boxes (first 5): {boxes[:5].tolist()}")
         print("="*70 + "\n")
-        
+
         break
 
 @torch.no_grad()
@@ -899,7 +898,6 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 targets[0]['labels'] = torch.empty((0,), dtype=targets[0]['labels'].dtype)
 
 
-            #if len(filtered_outputs[0]["boxes"]) >= 0 :
             if len(targets[0]['boxes']) > 0: # ignore tiles without boxes
                 #print("this image has GT boxes "+str(imageName))
                 correctedLabels, correctedBoxes = filtered_outputs[0]["labels"],filtered_outputs[0]["boxes"]
@@ -948,31 +946,17 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 cv2.imwrite( os.path.join(predFolder,"PREDMASK"+imageName),predMask  )
                 boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),boxCatAndCoords)
 
-                #if len(targets[0]['boxes']) >120:
-                #    cv2.imwrite( str(len(targets[0]['boxes']))+"boxes"+imageName, imToStore*255 )
-                #    boxCoordsToFile("BOXCOORDS"+imageName[:-4]+".txt",boxCatAndCoords)
-
                 count+=1
+            else:
+                # for tiles with no boxes, create empty prediction file
+                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),[])
 
 
-            #else:
-                #print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ this image has no GT boxes "+str(imageName))
-
-                # ignore if there are no outputs unless there should be
-            #    if len(targets[0]['boxes']) >= 5:
-            #        prec,rec, dS, invS , boxCoords, boxCatAndCoords = 0, 0, 0, 0, [], []
-            #        print("in this case I did not predict boxes and I should have "+str(len(targets[0]['boxes']))+" but i only had "+str(len(filtered_outputs[0]["boxes"])))
-
-
-            #        precList.append(prec)
-            #        recList.append(rec)
-            #        dScore.append(dS)
-            #        invScore.append(invS)
 
             # always store the tile
             cv2.imwrite( os.path.join(predFolder,imageName), imToStore*255 )
 
-            # clean up    
+            # clean up
             del outputs
             del filtered_outputs
             torch.cuda.empty_cache()
@@ -981,7 +965,8 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
     # now reconstruct the full images and masks from what we have in the folder
     # the original data folder should also be accessed and passed to the function
     for imageN,TileList  in dataset_test.getSliceFileInfo().items():
-        rebuildImageFromTiles(imageN, TileList, predFolder, origFolder)
+        #rebuildImageFromTiles(imageN, TileList, predFolder, origFolder)
+        rebuildImageFromTiles(imageN, TileList, predFolder)
 
     # accumulate predictions from all images
     torch.set_num_threads(n_threads)

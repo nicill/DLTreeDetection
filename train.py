@@ -5,7 +5,7 @@ import torch
 import yaml
 import sys
 
-from datasets import ODDataset
+from datasets import TDDataset
 import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
@@ -36,10 +36,10 @@ from torchvision.models import (
     ConvNeXt_Tiny_Weights, ConvNeXt_Small_Weights, ConvNeXt_Base_Weights,
     ConvNeXt_Large_Weights)
 
-from transformers import DetrForObjectDetection, DetrImageProcessor, DeformableDetrImageProcessor, DeformableDetrForObjectDetection,DeformableDetrConfig
+#from transformers import DetrForObjectDetection, DetrImageProcessor, DeformableDetrImageProcessor, DeformableDetrForObjectDetection,DeformableDetrConfig
 import time
 from torch.optim.lr_scheduler import LinearLR, MultiStepLR, SequentialLR
-
+import multiprocessing
 
 torch.backends.cudnn.benchmark = True
 
@@ -117,14 +117,26 @@ def convnext_fpn_backbone(
     )
 
 
-def makeTrainYAML(conf, fileName = 'trainAUTO.yaml', pDict = {}):
+def makeTrainYAML(conf, fileName='trainAUTO.yaml', pDict={}):
     """
-    Function to write a yaml file
+    Write a YOLO data YAML file. Requires conf["numClasses"] to exist.
+    The 'names' mapping will be {0: 'sp1', 1: 'sp2', ...}.
     """
-    data = { "names": {0: 'Kanji'}, "path": conf["TV_dir"], "train": conf["Train_dir"],
-            "val": conf["Valid_dir"]}
+    num_classes = int(conf.get("numClasses", 0))
+    if num_classes <= 0:
+        raise ValueError("conf['numClasses'] must be a positive integer.")
+
+    names = {i: f"sp{i+1}" for i in range(num_classes)}
+
+    data = {
+        "path": conf["TV_dir"],
+        "train": conf["Train_dir"],
+        "val": conf["Valid_dir"],
+        "names": names
+    }
     with open(fileName, 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
+    return fileName
 
 
 def train_YOLO(conf, datasrc, prefix = 'combined_data_', params = {}):
@@ -132,6 +144,7 @@ def train_YOLO(conf, datasrc, prefix = 'combined_data_', params = {}):
     Train a YOlO model from a
     train and validation folder
     """
+    print("YAML"+str(datasrc))
     resfolder = conf["Train_res"]
     epochs = conf["ep"]
     name = prefix+"epochs"+str(epochs)+'ex'
@@ -146,7 +159,7 @@ def train_YOLO(conf, datasrc, prefix = 'combined_data_', params = {}):
     scVal = 0.5 if "scale" not in params else params["scale"]
     mosVal = 1.0 if "mosaic" not in params else params["mosaic"]
 
-    overrides = {'data': datasrc, 'epochs': epochs, 'imgsz': imgsize, 'name': name, 
+    overrides = {'data': datasrc, 'epochs': epochs, 'imgsz': imgsize, 'name': name,
                   'device': 0,'patience': 10,'exist_ok': True, 'scale': scVal, 'mosaic': mosVal}
 
     model.overrides.update(overrides)
@@ -164,7 +177,7 @@ def train_YOLO(conf, datasrc, prefix = 'combined_data_', params = {}):
     # Return the path where the model was saved
     model_path = os.path.join(resfolder, "detect", name, "weights", "best.pt")
     print(f"Model saved to: {model_path}")
-    
+
     return model_path
 
 def diagnose_training_data(data_loader, processor, num_samples=3):
@@ -174,73 +187,73 @@ def diagnose_training_data(data_loader, processor, num_samples=3):
     print("\n" + "="*60)
     print("DIAGNOSTIC: Checking Training Data Format")
     print("="*60)
-    
+
     for i, (images, targets) in enumerate(data_loader):
         if i >= num_samples:
             break
-            
+
         print(f"\n--- Sample {i} ---")
-        
+
         # Get original image
         try:
             img_np = images[0].permute(1, 2, 0).cpu().numpy()
         except:
             img_np = np.array(images[0])
-        
+
         orig_h, orig_w = img_np.shape[:2]
         print(f"Original image shape (HxW): {orig_h}x{orig_w}")
-        
+
         # Get annotations BEFORE processor
         if len(targets) > 0 and "annotations" in targets[0]:
             raw_anns = targets[0]["annotations"]
             print(f"Number of annotations: {len(raw_anns)}")
-            
+
             # Check first few annotations
             for j, ann in enumerate(raw_anns[:3]):
                 bbox = ann["bbox"]
                 print(f"  Ann {j}: bbox={bbox}, category={ann.get('category_id', 'N/A')}")
-                
+
                 # Verify bbox is valid
                 x, y, w, h = bbox
                 if x < 0 or y < 0 or w <= 0 or h <= 0:
                     print(f"    ⚠️ WARNING: Invalid bbox coordinates!")
                 if x + w > orig_w or y + h > orig_h:
                     print(f"    ⚠️ WARNING: Bbox extends beyond image! (img: {orig_w}x{orig_h})")
-        
+
         # Process through processor
         imgs = list(images)
-        annotations = [{"image_id": idx, "annotations": t["annotations"]} 
+        annotations = [{"image_id": idx, "annotations": t["annotations"]}
                       for idx, t in enumerate(targets)]
-        
-        encoding = processor(images=imgs, annotations=annotations, 
+
+        encoding = processor(images=imgs, annotations=annotations,
                            return_tensors="pt", do_rescale=True)
-        
+
         pixel_values = encoding["pixel_values"]
         proc_h, proc_w = pixel_values.shape[2], pixel_values.shape[3]
         print(f"Processed image shape (HxW): {proc_h}x{proc_w}")
-        
+
         # Check processed labels
         labels = encoding["labels"]
         if len(labels) > 0:
             label = labels[0]
             print(f"Processed label keys: {label.keys()}")
-            
+
             if "boxes" in label:
                 boxes = label["boxes"]
                 print(f"  Boxes shape: {boxes.shape}")
                 print(f"  Boxes (first 3): {boxes[:3].tolist()}")
                 print(f"  Boxes format: {'normalized cxcywh' if boxes.max() <= 1.0 else 'absolute coordinates'}")
-                
+
                 # Check if boxes are reasonable
                 if boxes.max() > 1.0:
                     print(f"    ⚠️ WARNING: Boxes should be normalized [0,1] but found max={boxes.max():.4f}")
-            
+
             if "class_labels" in label:
                 class_labels = label["class_labels"]
                 print(f"  Class labels: {class_labels.tolist()}")
-        
+
         print(f"  Pixel values range: [{pixel_values.min():.4f}, {pixel_values.max():.4f}]")
-    
+
     print("\n" + "="*60)
     print("End of Diagnostic")
     print("="*60 + "\n")
@@ -257,70 +270,70 @@ def train_DETR(conf, datasrc, prefix='detr_exp_', params=None, file_path=""):
     batch_size = params.get("batch_size", 1)
     lr = params.get("lr", 1e-5)
     weight_decay = params.get("weight_decay", 1e-4)
-    
+
     print(f"[DETR] File: {file_path}, Train: {trainAgain}, Device: {device}, Epochs: {epochs}")
-    
+
     processor = DetrImageProcessor.from_pretrained(processor_name)
-    
+
     # Create or load model
     from transformers import DetrConfig
     config = DetrConfig.from_pretrained(processor_name)
     config.num_labels = 1
     model = DetrForObjectDetection(config)
-    
+
     if trainAgain:
         # Initialize from pretrained (except classification head)
         print(f"[DETR] Configuring model with num_labels={config.num_labels}")
         base_model = DetrForObjectDetection.from_pretrained(processor_name)
-        
-        pretrained_dict = {k: v for k, v in base_model.state_dict().items() 
+
+        pretrained_dict = {k: v for k, v in base_model.state_dict().items()
                           if k in model.state_dict() and v.shape == model.state_dict()[k].shape}
-        
+
         model.load_state_dict(pretrained_dict, strict=False)
         print(f"[DETR] Initialized with pretrained weights (except class head)")
     elif os.path.exists(file_path):
         model.load_state_dict(torch.load(file_path, map_location='cpu'))
         print(f"[DETR] Loaded model from {file_path}")
-    
+
     model.to(device)
-    
+
     if not trainAgain:
         model.eval()
         return model
-    
+
     # Training setup
     data_loader = torch.utils.data.DataLoader(
         datasrc, batch_size=batch_size, shuffle=True, collate_fn=collate_fn_DETR_skip_empty
     )
-    
+
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=lr, weight_decay=weight_decay
     )
-    
+
     # Learning rate schedule
     step_size = max(epochs // 4 if epochs >= 100 else epochs // 3, 5)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=0.1)
     print(f"[DETR] LR schedule: drop by 0.1x every {step_size} epochs")
-    
+
     # Training loop
     model.train()
-    
+
     for epoch in range(epochs):
         total_loss = 0.0
-        
+
         for batch_idx, (images, targets) in enumerate(data_loader):
             # Prepare data
-            annotations = [{"image_id": i, "annotations": t["annotations"]} 
+            annotations = [{"image_id": i, "annotations": t["annotations"]}
                           for i, t in enumerate(targets)]
-            
-            encoding = processor(images=list(images), annotations=annotations, 
+
+            encoding = processor(images=list(images), annotations=annotations,
                                return_tensors="pt", do_rescale=True)
-            
+
             pixel_values = encoding["pixel_values"].to(device)
-            hf_labels = [{k: v.to(device) if isinstance(v, torch.Tensor) else v 
+            hf_labels = [{k: v.to(device) if isinstance(v, torch.Tensor) else v
                          for k, v in lab.items()} for lab in encoding["labels"]]
-            
+
             # Diagnostic (first batch only)
             if epoch == 0 and batch_idx == 0:
                 print("\n" + "="*70)
@@ -332,28 +345,28 @@ def train_DETR(conf, datasrc, prefix='detr_exp_', params=None, file_path=""):
                     print(f"First target: boxes={hf_labels[0]['boxes'].shape}, "
                           f"classes={hf_labels[0]['class_labels'].unique().tolist()}")
                 print("="*70 + "\n")
-            
+
             # Forward + backward
             outputs = model(pixel_values=pixel_values, labels=hf_labels)
             loss = outputs.loss if outputs.loss is not None else sum(outputs.loss_dict.values())
-            
+
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
             optimizer.step()
-            
+
             total_loss += loss.item()
-        
+
         lr_scheduler.step()
         avg_loss = total_loss / len(data_loader)
-        
+
         print(f"[DETR] Epoch {epoch+1}/{epochs} - loss: {avg_loss:.6f}")
         if hasattr(outputs, 'loss_dict'):
             print(f"  {', '.join(f'{k}: {v.item():.4f}' for k, v in outputs.loss_dict.items())}")
-    
+
     torch.save(model.state_dict(), file_path)
     print(f"[DETR] Saved to {file_path}")
-    
+
     return model
 
 
@@ -361,7 +374,7 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
     """
     Train Deformable DETR with CORRECT configuration for single-class detection
     """
-   
+
     params = {} if params is None else params
     epochs = params.get("num_epochs", conf.get("ep", 50))
     processor_name = "SenseTime/deformable-detr"
@@ -370,17 +383,17 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
     batch_size = params.get("batch_size", 2)
     lr = params.get("lr", 1e-4)
     weight_decay = params.get("weight_decay", 1e-4)
-    
+
     print(f"[Deformable DETR] Training for {epochs} epochs")
-    
+
     processor = DeformableDetrImageProcessor.from_pretrained(processor_name)
-    
+
     if trainAgain:
         # Step 1: Create model from scratch with correct config
         print(f"[Deformable DETR] Creating model from scratch...")
         config = DeformableDetrConfig.from_pretrained(processor_name)
         config.num_labels = 1  # This will create 2 output dims (object + no-object)
-        
+
         # Create new model with correct architecture
         model = DeformableDetrForObjectDetection(config)
 
@@ -393,7 +406,7 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
             classifier = model.class_embed
         elif hasattr(model.model, 'class_embed'):
             classifier = model.model.class_embed
-        
+
         if classifier is not None:
             # Check if it's a ModuleList or single layer
             if isinstance(classifier, nn.ModuleList):
@@ -405,21 +418,21 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
                 # Single layer
                 out_features = classifier.out_features
                 print(f"[Deformable DETR] Classification head output dims: {out_features}")
-            
+
             assert out_features == 2, \
                 f"ERROR: Expected 2 outputs, got {out_features}"
             print(f"[Deformable DETR] ✓ Model ready with 2 output dimensions")
         else:
             print(f"[Deformable DETR] WARNING: Could not find classification head to verify")
-        
+
         # Step 2: Load pretrained backbone
         print(f"[Deformable DETR] Loading pretrained backbone...")
         pretrained_model = DeformableDetrForObjectDetection.from_pretrained(processor_name)
-        
+
         # Copy backbone weights only
         pretrained_state = pretrained_model.state_dict()
         model_state = model.state_dict()
-        
+
         # Only copy backbone and encoder (not classification head)
         copied_keys = []
         for key in pretrained_state.keys():
@@ -429,26 +442,26 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
             if key in model_state and pretrained_state[key].shape == model_state[key].shape:
                 model_state[key] = pretrained_state[key]
                 copied_keys.append(key)
-        
+
         model.load_state_dict(model_state)
         print(f"[Deformable DETR] Copied {len(copied_keys)} parameter tensors from pretrained")
-        
+
         del pretrained_model
     else:
         # Load previously trained model
         config = DeformableDetrConfig.from_pretrained(processor_name)
         config.num_labels = 1
         model = DeformableDetrForObjectDetection(config)
-        
+
         if os.path.exists(file_path):
             state = torch.load(file_path, map_location='cpu')
             model.load_state_dict(state)
             print(f"[Deformable DETR] Loaded from {file_path}")
         else:
             print(f"[Deformable DETR] File not found: {file_path}")
-    
+
     model.to(device)
-    
+
     # Create dataloader
     from datasets import collate_fn
     data_loader = torch.utils.data.DataLoader(
@@ -457,42 +470,42 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
         shuffle=True,
         collate_fn=collate_fn
     )
-    
+
     # Optimizer
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=lr,
         weight_decay=weight_decay
     )
-    
+
     # Learning rate scheduler
     from torch.optim.lr_scheduler import MultiStepLR
     lr_scheduler = MultiStepLR(optimizer, milestones=[int(epochs*0.8)], gamma=0.1)
-    
+
     if trainAgain:
         model.train()
         best_loss = float('inf')
-        
+
         for epoch in range(epochs):
             total_loss = 0.0
             num_batches = 0
-            
+
             for batch_idx, (images, targets) in enumerate(data_loader):
                 imgs = list(images)
-                annotations = [{"image_id": i, "annotations": t["annotations"]} 
+                annotations = [{"image_id": i, "annotations": t["annotations"]}
                               for i, t in enumerate(targets)]
-                
-                encoding = processor(images=imgs, annotations=annotations, 
+
+                encoding = processor(images=imgs, annotations=annotations,
                                    return_tensors="pt", do_rescale=True)
-                
+
                 pixel_values = encoding["pixel_values"].to(device)
                 labels = encoding["labels"]
-                hf_labels = [{k: (v.to(device) if isinstance(v, torch.Tensor) else v) 
+                hf_labels = [{k: (v.to(device) if isinstance(v, torch.Tensor) else v)
                              for k, v in lab.items()} for lab in labels]
-                
+
                 outputs = model(pixel_values=pixel_values, labels=hf_labels)
                 loss = outputs.loss
-                
+
                 # Diagnostic first batch
                 if epoch == 0 and batch_idx == 0:
                     print(f"\n[DIAGNOSTIC] First batch:")
@@ -505,27 +518,27 @@ def train_DeformableDETR(conf, datasrc, prefix='deformable_detr_', params=None, 
                         print(f"  The transformers library may have a bug with num_labels=1")
                     else:
                         print(f"  ✓ Correct output dimensions")
-                
+
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 0.1)
                 optimizer.step()
-                
+
                 total_loss += loss.item()
                 num_batches += 1
-            
+
             lr_scheduler.step()
             avg_loss = total_loss / max(num_batches, 1)
-            
+
             if (epoch + 1) % 5 == 0 or epoch < 3:
                 print(f"[Deformable DETR] Epoch {epoch+1}/{epochs} - loss: {avg_loss:.6f}")
-            
+
             if avg_loss < best_loss:
                 best_loss = avg_loss
                 torch.save(model.state_dict(), file_path)
-        
+
         print(f"[Deformable DETR] Training finished, saved to {file_path}")
-    
+
     return model
 
 
@@ -553,25 +566,32 @@ def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
                         trainAgain = False, proportion = 0.9, mType = "maskrcnn",
                         trainParams = {"score":0.5,"nms":0.3} ):
 
+    num_workers = min(8, max(1, multiprocessing.cpu_count() - 4))  # tune if needed
     data_loader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size = 1,
-        shuffle=False,
-        collate_fn=collate_fn
+    dataset,
+    batch_size=1,
+    shuffle=True,
+    collate_fn=collate_fn,
+    num_workers=num_workers,
+    pin_memory=True,
+    persistent_workers=True
     )
 
     # probably have a look at this  https://discuss.pytorch.org/t/how-to-use-collate-fn/27181/2
-    print("Training Dataset Length "+str(len(dataset)))
+    print("Inside Pytorch training Training Dataset Length "+str(len(dataset)))
 
     if trainAgain :
+        print("train again")
         model = get_model_instance_segmentation(num_classes,mType = mType)
         if mType in ["maskrcnn","fasterrcnn","convnextmaskrcnn"]:
+            print("maskrcnn")
             model.roi_heads.score_thresh = trainParams["score"]  # Increase to filter out low-confidence boxes (default ~0.05)
             model.roi_heads.nms_thresh = trainParams["nms"]   # Reduce to suppress more overlapping boxes (default ~0.5)
         elif mType in ["retinanet","fcos","ssd"]:
             model.score_thresh = trainParams["score"]
             model.nms_thresh = trainParams["nms"]
 
+        print("have the model")
         # move model to the right device
         model.to(device)
 
@@ -764,21 +784,21 @@ def collate_fn_DETR_skip_empty(batch):
     Use this if you want to avoid training on empty tiles.
     """
     filtered_batch = []
-    
+
     for image, target in batch:
         # Skip if no annotations
         if "annotations" in target and len(target["annotations"]) > 0:
             filtered_batch.append((image, target))
-    
+
     # If all samples were empty, return a dummy batch
     # (This shouldn't happen often with proper dataset filtering)
     if len(filtered_batch) == 0:
         print("WARNING: Empty batch after filtering, using first sample from original batch")
         filtered_batch = [batch[0]]
-    
+
     images = []
     targets = []
-    
+
     for image, target in filtered_batch:
         if isinstance(image, torch.Tensor):
             images.append(image)
@@ -790,13 +810,12 @@ def collate_fn_DETR_skip_empty(batch):
                     image = torch.from_numpy(image)
             images.append(image)
         targets.append(target)
-    
+
     return images, targets
 
 
 def get_model_instance_segmentation(num_classes, mType = "maskrcnn"):
-    # load an instance segmentation model pre-trained on COCO
-    #model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights="DEFAULT")
+    print("get_model_instance_segmentation " + str(num_classes))
     if mType == "maskrcnn":
         model = torchvision.models.detection.maskrcnn_resnet50_fpn_v2(weights="DEFAULT")
 
@@ -814,6 +833,8 @@ def get_model_instance_segmentation(num_classes, mType = "maskrcnn"):
             hidden_layer,
             num_classes
         )
+        print("cls out:", model.roi_heads.box_predictor.cls_score.out_features)
+        print("mask out:", model.roi_heads.mask_predictor.mask_fcn_logits.out_channels)
     elif mType == "fasterrcnn":
         model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights="DEFAULT")
 

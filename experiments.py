@@ -21,8 +21,8 @@ from predict import detectBlobsMSER,detectBlobsDOG
 from imageUtils import boxesFound,read_Binary_Mask,recoupMasks
 from train import train_YOLO,makeTrainYAML, get_transform, train_pytorchModel,train_DETR, train_DeformableDETR
 
-from dataHandlding import (buildTRVT,buildNewDataTesting,separateTrainTest, 
-                           forPytorchFromYOLO, buildTestingFromSingleFolderSakuma2, 
+from dataHandlding import (buildTRVT,buildNewDataTesting,separateTrainTest,
+                           forPytorchFromYOLO, buildTestingFromSingleFolderSakuma2,
                            buildTestingFromSingleFolderSakuma2NOGT,
                            makeParamDicts, paramsDictToString)
 from predict import predict_yolo, predict_pytorch, predict_DETR, predict_DeformableDETR_FIXED
@@ -240,8 +240,8 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
     num_classes = 2
     proportion = conf["Train_Perc"]/100
 
-    
-    if doPytorchModels: 
+
+    if doPytorchModels:
         print("creating dataset in experiment")
         dataset = ODDataset(os.path.join(conf["TV_dir"],conf["Train_dir"]), True, conf["slice"], get_transform())
         print("Experiments, train dataset length "+str(len(dataset) ))
@@ -251,7 +251,7 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
         dataset_test = ODDataset(os.path.join(conf["TV_dir"],conf["Test_dir"]), True, conf["slice"], get_transform())
     #dataset = dataset_test = None # debugging purposes
 
-    
+
     frcnnParams = makeParamDicts(["modelType","score", "nms", "predconf"],[["fasterrcnn","maskrcnn","ssd","fcos","retinanet","convnextmaskrcnn"],[0.05,0.1,0.25,0.5],[0.25,0.5,0.75],[0.3,0.5,0.7,0.8,0.9]]) if doPytorchModels else []
     #frcnnParams = makeParamDicts(["modelType","score", "nms", "predconf"],[["maskrcnn"],[0.25],[0.5],[0.7]]) if doPytorchModels else []
 
@@ -294,7 +294,7 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
             f.write("problem with training "+str(e)+"\n")
             f.flush()
         except ValueError:
-            print("some sort of value error")            
+            print("some sort of value error")
         except:
             print("Unexpected error:", sys.exc_info()[0])
 
@@ -347,7 +347,7 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
                         },
                         file_path=filePath
                     )
-                elif tParams["modelType"] == "DEFDETR": 
+                elif tParams["modelType"] == "DEFDETR":
                     model = train_DeformableDETR(
                         conf=conf,
                         datasrc=detr_dataset,
@@ -362,7 +362,7 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
                         },
                         file_path=filePath
                     )
-                else: raise Exception("Experiments: WRONG DETR MODEL")                                                      
+                else: raise Exception("Experiments: WRONG DETR MODEL")
             else:
                 model = DetrForObjectDetection.from_pretrained("facebook/detr-resnet-50")
                 state = torch.load(filePath, map_location=device)
@@ -389,7 +389,7 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
                     predFolder=os.path.join(conf["Pred_dir"], "DETR_exp" + paramsDictToString(tParams)),
                     origFolder=os.path.join(conf["TV_dir"], conf["Test_dir"], "images")
                 )
-            elif tParams["modelType"] == "DEFDETR": 
+            elif tParams["modelType"] == "DEFDETR":
                 #prec, rec, oprec, orec = predict_DETR(
                 #    dataset_test=ODDETRDataset(
                 #        os.path.join(conf["TV_dir"], conf["Test_dir"]),
@@ -418,11 +418,11 @@ def DLExperiment(conf, doYolo = False, doPytorchModels = False, doDETR = False):
                     predFolder=os.path.join(conf["Pred_dir"], "DETR_exp" + paramsDictToString(tParams)),
                     origFolder=os.path.join(conf["TV_dir"], conf["Test_dir"], "images")
                 )
-                
 
 
-            else: raise Exception("Experiments: WRONG DETR MODEL IN TESTING")                                                      
-            
+
+            else: raise Exception("Experiments: WRONG DETR MODEL IN TESTING")
+
             end = time.time()
             testTime = end - start
 
@@ -454,38 +454,12 @@ if __name__ == "__main__":
     # DL experiment
     conf = read_config(configFile)
     print(conf)
-    
+
     # Define single parameter sets
     yolo_params = {"scale": 0.3, "mosaic": 0.5} if doYolo else None
     pytorch_params = {"modelType": "fasterrcnn", "score": 0.25, "nms": 0.5, "predconf": 0.7} if doPytorch else None
-    detr_params = {"modelType": "DETR", "lr": 5e-6, "batch_size": 8, "predconf": 0.5, 
+    detr_params = {"modelType": "DETR", "lr": 5e-6, "batch_size": 8, "predconf": 0.5,
                    "nms_iou": 0.5, "max_detections": 50, "resize": 800} if doDETR else None
-    
+
     # Run experiments
     MODULARDLExperiment(conf, yolo_params, pytorch_params, detr_params)
-
-
-#initial experiment
-#if __name__ == "__main__":
-#    print("IS CUDA AVAILABLE???????????????????????/")
-#    print(torch.cuda.is_available())
-
-    # Configuration file name, can be entered in the command line
-#    configFile = "config.ini" if len(sys.argv) < 2 else sys.argv[1]
-
-    #computeAndCombineMasks(configFile)
-
-    # DL experiment
-#    conf = read_config(configFile)
-#    print(conf)
-
-#    DLExperiment(conf, doYolo = False , doPytorchModels = False, doDETR = True)
-#    DLExperiment(conf, doYolo = False , doPytorchModels = True, doDETR = False)
-#    DLExperiment(conf, doYolo = True , doPytorchModels = False, doDETR = False)
-
-
-
-#classicalDescriptorExperiment(configFile)
-#BEST
-#DOG 77.5665178571429	 {'over': 0.5;min_s': 20;max_s': 100}
-# MSER 72.6126785714286	 {'delta': 5;minA': 500;maxA': 25000}

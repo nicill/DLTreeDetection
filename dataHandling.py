@@ -14,18 +14,40 @@ import re
 import numpy as np
 from scipy import ndimage
 
+def makeParamDicts(pars,vals):
+    """
+        Receives a list with parameter names
+        and a list of list with values
+        for each parameter
+
+        Creates a list of dictionaries
+        with the combinations of parameters
+    """
+    prod = list(product(*vals))
+    res = [dict(zip(pars,tup)) for tup in prod]
+    return res
+
+def paramsDictToString(aDict, forFileName = False, sep = ""):
+    """
+    Function to create a string from a params dict
+    """
+    ret = ""
+    for k,v in aDict.items():
+        if not forFileName or k != "predconf":ret+=str(k)+sep+str(v)+sep
+    return ret[:-1] if sep != "" else ret
+
 def simplifyOneSite(dataF, listOfClasses, outFolder):
     """
     receive the name of a folder containing a site
     and a list of classes to keep
-    put all pixels in other classes to black, 
+    put all pixels in other classes to black,
     rename the classes remaining to match the order in the list
-    save the result in the provided outFolder 
+    save the result in the provided outFolder
     """
     # make sure the classes are integers
     listOfClasses = list(map(int, listOfClasses))
 
-    # retrieve site name 
+    # retrieve site name
     siteName = os.path.basename(dataF)
 
     classNameDict = { listOfClasses[i]: i + 1 for i in range(len(listOfClasses))  } # to renumber classes starting at 1
@@ -35,10 +57,10 @@ def simplifyOneSite(dataF, listOfClasses, outFolder):
 
     # read the mosaic
     mosaic = read_Color_Image(os.path.join(dataF,siteName+".jpg"))
-    
+
     # put the pixels corresponding to classes not kept to black
     for l in np.delete(np.unique(labelIm),0):
-        if l not in listOfClasses: 
+        if l not in listOfClasses:
             mosaic[ labelIm == l ] = (0,0,0)
         else:
             # read and store binary mask
@@ -48,21 +70,21 @@ def simplifyOneSite(dataF, listOfClasses, outFolder):
 
     # store the result
     cv2.imwrite(os.path.join(outFolder,siteName+".jpg"), mosaic)
-        
+
     # read the file with the boxes
     boxes = readBB(os.path.join(dataF,siteName+"BBoxes.txt"))
     newboxes = [ (b[0],b[1],b[2],b[3],classNameDict[b[4]]) for b in boxes if b[4] in listOfClasses   ]
 
     boxCoordsToFile( os.path.join(outFolder, siteName+"BBoxes.txt"), newboxes)
 
-    # also copy roi file 
+    # also copy roi file
     shutil.copyfile( os.path.join( dataF,siteName+"ROI.jpg") , os.path.join( outFolder,siteName+"ROI.jpg") )
 
 def simplifyClasses(dataFolder, listOfClasses, outFolder):
     """
         Receive a data folder with one folder for every site
         a list of classes to keep and an output folder
-        simplify the mosaics and boxlists for all folders containing subsites 
+        simplify the mosaics and boxlists for all folders containing subsites
         and store the result in outFolder
     """
     # Get the list of files in the folder.
@@ -144,18 +166,53 @@ def filterBoxesWindow(boxes, ymin, ymax, xmin, xmax):
             filtered.append((inter_xmin - xmin, inter_ymin - ymin, inter_w, inter_h, cat))
     return filtered
 
-
-
-def boxCoordsToFile(file,boxC):
+def filterBoxesWindowNormalized(boxes, ymin, ymax, xmin, xmax, full_w, full_h):
     """
-        Receive a list of tuples with bounding boxes and write it to file
-    """
-    def writeTuple(tup):
-        px,py,w,h,sP = tup
-        f.write(str(px)+" "+str(py)+" "+str(w)+" "+str(h)+" "+str(sP)+"\n")
+    Filter YOLO-normalized boxes inside a tile.
 
-    with open(file, 'a') as f:
-        list(map( writeTuple, boxC))
+    boxes: list of (cx, cy, w, h, cat) normalized to the full image.
+    ymin, ymax, xmin, xmax: tile boundaries in pixel coordinates.
+    full_w, full_h: full image dimensions.
+
+    Returns boxes cropped to the tile and normalized to the tile size.
+    """
+    tile_w = xmax - xmin
+    tile_h = ymax - ymin
+    filtered = []
+
+    for cx, cy, w, h, cat in boxes:
+        # Convert normalized → pixel
+        px = cx * full_w
+        py = cy * full_h
+        pw = w * full_w
+        ph = h * full_h
+
+        # Compute intersection with tile
+        ix1 = max(px - pw/2, xmin)
+        iy1 = max(py - ph/2, ymin)
+        ix2 = min(px + pw/2, xmax)
+        iy2 = min(py + ph/2, ymax)
+
+        iw = ix2 - ix1
+        ih = iy2 - iy1
+        inter_area = max(iw, 0) * max(ih, 0)
+
+        # Keep only if >= 50% of original area
+        if inter_area >= 0.5 * pw * ph and iw > 0 and ih > 0:
+
+            # Convert intersection back into tile coordinate system
+            rx = ix1 - xmin
+            ry = iy1 - ymin
+
+            # Convert to YOLO-normalized tile coords
+            tcx = (rx + iw/2) / tile_w
+            tcy = (ry + ih/2) / tile_h
+            tw  = iw / tile_w
+            th  = ih / tile_h
+
+            filtered.append((tcx, tcy, tw, th, cat))
+
+    return filtered
 
 def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
     """
@@ -199,7 +256,7 @@ def sliceFolder(dataFolder,siteNumber,outFolder, slice, verbose = False):
 def prepareDataFolder(dataFolder,sites,outFolder,slice):
     """
         Receives the root of a data folder in Sarah's format
-        and a list of sieNumbers
+        and a list of siteNumbers
         calls sliceFolder for all the sites in the list
     """
     # make output folder if it did not exist
@@ -209,42 +266,70 @@ def prepareDataFolder(dataFolder,sites,outFolder,slice):
         print("Starting site "+str(site))
         sliceFolder(dataFolder,site,outputFolder, slice)
 
+def computeBBfromLIEnshurin(labelIM):
+    """
+    Compute bounding boxes from the label image.
+    Also returns YOLO-format normalized bounding boxes.
+    Each connected component gets its own bounding box with its original category label.
+    """
+    # Handle 3D images by taking one channel
+    if labelIM.ndim == 3:
+        labelIM = labelIM[:, :, 0]
 
-def computeBBfromLI(labelIM):
-    """
-        Compute bounding boxes 
-        from the label image    
-    """
+    H, W = labelIM.shape
+
     int_labelIM = labelIM.astype(np.int32)
-    slices = ndimage.find_objects(int_labelIM)
-    boxes = []
 
-    for label, slc in enumerate(slices, start=1):
+    relabeled, num_features = ndimage.label(int_labelIM > 0,
+                                            structure=np.ones((3, 3)))
+
+    slices = ndimage.find_objects(relabeled)
+
+    boxes_xywh = []     # (px, py, w, h, label)
+    boxes_yolo = []     # (cx_norm, cy_norm, w_norm, h_norm, label)
+
+    for label_idx, slc in enumerate(slices, start=1):
         if slc is None:
-            continue  # Label not present
+            continue
 
         y_start, y_stop = slc[0].start, slc[0].stop
         x_start, x_stop = slc[1].start, slc[1].stop
 
+        region_original = int_labelIM[slc]
+        region_relabeled = relabeled[slc]
+
+        original_label = region_original[region_relabeled == label_idx][0]
+
         px = x_start
         py = y_start
-        w = x_stop - x_start
-        h = y_stop - y_start
+        w  = x_stop - x_start
+        h  = y_stop - y_start
 
-        boxes.append((px, py, w, h, 1)) # in this case, all labels are just "tree"
+        boxes_xywh.append((px, py, w, h, original_label))
 
-    return boxes
+        # --- YOLO format ---
+        cx = px + w / 2.0
+        cy = py + h / 2.0
+        cx_norm = cx / W
+        cy_norm = cy / H
+        w_norm  = w / W
+        h_norm  = h / H
+
+        boxes_yolo.append((cx_norm, cy_norm, w_norm, h_norm, int(original_label)-1 ))
+
+    return boxes_xywh, boxes_yolo
+
 
 def prepareDataKoi(lIMfile, mosFile, outFolderRoot, trainPerc, slice, verbose = True):
     """
-        Given a mosaic and 
+        Given a mosaic and
     """
     labelIM = cv2.imread(lIMfile,cv2.IMREAD_UNCHANGED)
     mosaic = read_Color_Image(mosFile)
     boxes = computeBBfromLI(labelIM)
 
     # because all labels are just "tree", we change the label image so it only contains 0 and 1
-    labelIM[labelIM != 0] = 1     
+    labelIM[labelIM != 0] = 1
 
     # create output folder if it does not exist
     Path(outFolderRoot).mkdir(parents=True, exist_ok=True)
@@ -278,7 +363,7 @@ def prepareDataKoi(lIMfile, mosFile, outFolderRoot, trainPerc, slice, verbose = 
 
 
 if __name__ == '__main__':
-    
+
     simplifyData = True
     prepareData = False
     prepare = "Sarah"
@@ -288,7 +373,7 @@ if __name__ == '__main__':
     if simplifyData:
         # call this function inputFolder, outputFolder, list of classes
         simplifyClasses(sys.argv[1], sys.argv[3:], sys.argv[2])
-    
+
     if prepareData:
 
         slice = 1000
