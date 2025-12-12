@@ -124,7 +124,7 @@ class TDDataset(Dataset):
             labels.append(l)
             masks.append(extractMask(labelIm,(px,py,w,h,cat)))
         # transform labels and masks to torch tensor
-        torch.tensor(labels, dtype=torch.int64)
+        labels = torch.tensor(labels, dtype=torch.int64)
         #masks = torch.as_tensor(masks, dtype=torch.uint8)
         masks = torch.from_numpy(np.stack(masks)).to(torch.bool)
         masks = torch.as_tensor(masks, dtype=torch.uint8)

@@ -519,7 +519,10 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
                 os.makedirs(predFolder, exist_ok=True)
                 cv2.imwrite(os.path.join(predFolder, imageName), cv2.cvtColor(imToStore, cv2.COLOR_RGB2BGR))
                 cv2.imwrite(os.path.join(predFolder, "PREDMASK"+imageName), predMask)
-                boxCoordsToFile(os.path.join(predFolder, "BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords)
+                boxCatAndCoords_XYWH = [(x1, y1, x2 - x1, y2 - y1, c) for c, x1, y1, x2, y2 in boxCatAndCoords]
+                print(boxCatAndCoords)
+                print(boxCatAndCoords_XYWH)
+                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords_XYWH)
 
             count += 1
 
@@ -806,8 +809,6 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
     """
         Inference for pytorch object detectors
         possible postprocess values, 0 for no postprocess
-        1 for only double box removal
-        2 for double box and grid filling
     """
     def boxAndCatsToList(lab, boxes):
         """
@@ -901,12 +902,6 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
             if len(targets[0]['boxes']) > 0: # ignore tiles without boxes
                 #print("this image has GT boxes "+str(imageName))
                 correctedLabels, correctedBoxes = filtered_outputs[0]["labels"],filtered_outputs[0]["boxes"]
-                # apply postprocessing if needed
-                # modify boxes and labels to eliminate boxes with too much overlap
-                if postProcess > 0: correctedLabels, correctedBoxes = filter_boxes_by_overlap_and_area_distance(filtered_outputs[0]["labels"],filtered_outputs[0]["boxes"], 255*imToStore, os.path.join(predFolder,"removal"+imageName))
-
-                # now try to fill holes in the grid
-                if postProcess > 1: correctedLabels, correctedBoxes = fillHolesInGrid(correctedLabels, correctedBoxes, imToStore, os.path.join(predFolder,"newBoxes"+imageName))
 
                 TP,FP,FN = boxListEvaluation(correctedBoxes,targets[0]["boxes"])
                 #update totals
@@ -944,14 +939,18 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 predMask = maskFromBoxes(boxCoords,imToStore.shape)
                 #print("writing predmask "+str(os.path.join(predFolder,"PREDMASK"+imageName)))
                 cv2.imwrite( os.path.join(predFolder,"PREDMASK"+imageName),predMask  )
+                boxCatAndCoords_XYWH = [(x1, y1, x2 - x1, y2 - y1, c) for c, x1, y1, x2, y2 in boxCatAndCoords]
+                print(boxCatAndCoords)
+                print(boxCatAndCoords_XYWH)
+                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords_XYWH)
+
+
                 boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),boxCatAndCoords)
 
                 count+=1
             else:
                 # for tiles with no boxes, create empty prediction file
                 boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),[])
-
-
 
             # always store the tile
             cv2.imwrite( os.path.join(predFolder,imageName), imToStore*255 )

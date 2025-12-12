@@ -142,9 +142,7 @@ def buildGT(folder):
 
 def readBB(file_path):
     """
-        Reads a text file where each line contains:
-        px, py, w, h, cat
-        and returns a list of bounding box dictionaries.
+        Reads a text file where each line contains a tuple and returns the format unchanges
     """
     with open(file_path) as f:
         return list(map(lambda l: tuple(map(int, l.split())), f))

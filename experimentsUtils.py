@@ -123,6 +123,7 @@ class PyTorchModelExperiment(ModelExperiment):
                 trainAgain=train_again,
                 proportion=self.proportion,
                 mType=params["modelType"],
+                bs = self.conf["batchSize"],
                 trainParams=params
             )
             train_time = time.time() - start
@@ -255,12 +256,12 @@ def MODULARDLExperiment(conf, yolo_params=None, pytorch_params=None, detr_params
         print(f"\n=== Running PyTorch Model Experiment ===")
         print(f"Parameters: {pytorch_params}")
         experiment = PyTorchModelExperiment(conf, device)
-        try:
-            metrics, train_time, test_time = experiment.train_and_test(pytorch_params)
-            experiment.write_results(pytorch_params, metrics, train_time, test_time)
-            print(f"PyTorch Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
-        except Exception as e:
-            print(f"PyTorch experiment failed: {e}")
+        #try:
+        metrics, train_time, test_time = experiment.train_and_test(pytorch_params)
+        experiment.write_results(pytorch_params, metrics, train_time, test_time)
+        print(f"PyTorch Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
+        #except Exception as e:
+        #    print(f"PyTorch experiment failed: {e}")
 
     # Run DETR experiment
     if detr_params:

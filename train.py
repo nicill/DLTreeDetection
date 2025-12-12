@@ -564,12 +564,12 @@ def get_maskrcnn_convnext(num_classes, backbone_name='convnext_base', min_size=2
 
 def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
                         trainAgain = False, proportion = 0.9, mType = "maskrcnn",
-                        trainParams = {"score":0.5,"nms":0.3} ):
+                        bs = 1, trainParams = {"score":0.5,"nms":0.3} ):
 
     num_workers = min(8, max(1, multiprocessing.cpu_count() - 4))  # tune if needed
     data_loader = torch.utils.data.DataLoader(
     dataset,
-    batch_size=1,
+    batch_size = bs,
     shuffle=True,
     collate_fn=collate_fn,
     num_workers=num_workers,
@@ -591,7 +591,7 @@ def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
             model.score_thresh = trainParams["score"]
             model.nms_thresh = trainParams["nms"]
 
-        print("have the model")
+        print("model acquired")
         # move model to the right device
         model.to(device)
 
@@ -613,6 +613,7 @@ def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
 
         # train
         for epoch in range(num_epochs):
+            print("epoch "+str(epoch))
             # train for one epoch, printing every 10 iterations
             train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
             # update the learning rate
