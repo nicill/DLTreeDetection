@@ -519,10 +519,11 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
                 os.makedirs(predFolder, exist_ok=True)
                 cv2.imwrite(os.path.join(predFolder, imageName), cv2.cvtColor(imToStore, cv2.COLOR_RGB2BGR))
                 cv2.imwrite(os.path.join(predFolder, "PREDMASK"+imageName), predMask)
-                boxCatAndCoords_XYWH = [(x1, y1, x2 - x1, y2 - y1, c) for c, x1, y1, x2, y2 in boxCatAndCoords]
-                print(boxCatAndCoords)
-                print(boxCatAndCoords_XYWH)
-                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords_XYWH)
+                #boxCatAndCoords_XYWH = [(x1, y1, x2 - x1, y2 - y1, c) for c, x1, y1, x2, y2 in boxCatAndCoords]
+                #print(boxCatAndCoords)
+                #print(boxCatAndCoords_XYWH)
+                #this needs fixing maybe!!!!!
+                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords)
 
             count += 1
 
@@ -925,7 +926,7 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                     # convert so they are not tensors
                     el = el.tolist()
                     tup = tuple(tup.tolist())
-                    boxCatAndCoords.append((el,)+tup)
+                    boxCatAndCoords.append(tup+(el,))
 
                 thisPrec = 0 if (TP+FP) == 0 else (TP/(TP+FP))
                 precList.append(thisPrec)
@@ -939,14 +940,7 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 predMask = maskFromBoxes(boxCoords,imToStore.shape)
                 #print("writing predmask "+str(os.path.join(predFolder,"PREDMASK"+imageName)))
                 cv2.imwrite( os.path.join(predFolder,"PREDMASK"+imageName),predMask  )
-                boxCatAndCoords_XYWH = [(x1, y1, x2 - x1, y2 - y1, c) for c, x1, y1, x2, y2 in boxCatAndCoords]
-                print(boxCatAndCoords)
-                print(boxCatAndCoords_XYWH)
-                boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"), boxCatAndCoords_XYWH)
-
-
                 boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),boxCatAndCoords)
-
                 count+=1
             else:
                 # for tiles with no boxes, create empty prediction file
