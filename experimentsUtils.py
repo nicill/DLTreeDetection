@@ -17,7 +17,7 @@ from train import train_YOLO,makeTrainYAML, get_transform, train_pytorchModel,tr
 from dataHandling import paramsDictToString
 from predict import predict_yolo, predict_pytorch, predict_DETR
 
-#from transformers import DetrForObjectDetection, DetrImageProcessor, DeformableDetrImageProcessor
+from transformers import DetrForObjectDetection, DetrImageProcessor, DeformableDetrImageProcessor
 
 
 class ModelExperiment:
@@ -165,9 +165,29 @@ class DETRExperiment(ModelExperiment):
         train_time = 0
         if self.conf["Train"] or train_again:
             start = time.time()
-            train_dir = os.path.join(self.conf["TV_dir"], self.conf["Train_dir"])
-            detr_dataset = TDDETRDataset(dataFolder = train_dir, verbose = True, slice = self.conf["slice"],
-            transform = get_transform(),include_masks=True)
+            train_dir = os.path.join(self.conf["TV_dir"])
+            detr_dataset = TDDETRDataset(dataFolder = train_dir, verbose = False, slice = self.conf["slice"],
+            transform = None , include_masks = False)
+
+
+            # ADD DEBUG HERE:
+            print(f"\n=== DATASET DEBUG ===")
+            print(f"Dataset length: {len(detr_dataset)}")
+            if len(detr_dataset) > 0:
+                test_img, test_target = detr_dataset[0]
+                print(f"Sample 0 - image shape: {test_img.shape}")
+                print(f"Sample 0 - num annotations: {len(test_target['annotations'])}")
+                if len(test_target['annotations']) > 0:
+                    print(f"First annotation: {test_target['annotations'][0]}")
+                else:
+                    print("ERROR: Sample 0 has ZERO annotations!")
+                    # Try to see the raw data
+                    print(f"Checking raw box file: {detr_dataset.boxNameList[0]}")
+                    from train import readBB  # or wherever readBB is defined
+                    raw_boxes = readBB(detr_dataset.boxNameList[0])
+                    print(f"Raw boxes: {raw_boxes[:3] if len(raw_boxes) > 3 else raw_boxes}")
+            print("===================\n")
+
 
             train_params = {
                 "file_path": file_path,
@@ -195,8 +215,8 @@ class DETRExperiment(ModelExperiment):
         # Testing
         start = time.time()
         test_dir = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"])
-        test_dataset = TDDETRDataset(dataFolder = test_dir, verbose = True, slice = self.conf["slice"],
-        transform = get_transform(),include_masks=True)
+        test_dataset = TDDETRDataset(dataFolder = test_dir, verbose = False, slice = self.conf["slice"],
+        transform = None ,include_masks = False)
 
         pred_folder = os.path.join(self.conf["Pred_dir"], "DETR_exp" + paramsDictToString(params))
         orig_folder = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"], "images")
@@ -271,11 +291,11 @@ def MODULARDLExperiment(conf, yolo_params=None, pytorch_params=None, detr_params
         print(f"\n=== Running DETR Experiment ===")
         print(f"Parameters: {detr_params}")
         experiment = DETRExperiment(conf, device)
-        try:
-            metrics, train_time, test_time = experiment.train_and_test(detr_params)
-            experiment.write_results(detr_params, metrics, train_time, test_time)
-            print(f"DETR Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
-        except Exception as e:
-            print(f"DETR experiment failed: {e}")
+        #try:
+        metrics, train_time, test_time = experiment.train_and_test(detr_params)
+        experiment.write_results(detr_params, metrics, train_time, test_time)
+        print(f"DETR Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
+        #except Exception as e:
+        #    print(f"DETR experiment failed: {e}")
 
     print("\n=== All Experiments Complete ===")

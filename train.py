@@ -36,7 +36,7 @@ from torchvision.models import (
     ConvNeXt_Tiny_Weights, ConvNeXt_Small_Weights, ConvNeXt_Base_Weights,
     ConvNeXt_Large_Weights)
 
-#from transformers import DetrForObjectDetection, DetrImageProcessor
+from transformers import DetrForObjectDetection, DetrImageProcessor, DetrConfig
 import time
 from torch.optim.lr_scheduler import LinearLR, MultiStepLR, SequentialLR
 import multiprocessing
@@ -276,9 +276,8 @@ def train_DETR(conf, datasrc, prefix='detr_exp_', params=None, file_path=""):
     processor = DetrImageProcessor.from_pretrained(processor_name)
 
     # Create or load model
-    from transformers import DetrConfig
     config = DetrConfig.from_pretrained(processor_name)
-    config.num_labels = 1
+    config.num_labels = conf["numClasses"]
     model = DetrForObjectDetection(config)
 
     if trainAgain:
@@ -323,6 +322,19 @@ def train_DETR(conf, datasrc, prefix='detr_exp_', params=None, file_path=""):
         total_loss = 0.0
 
         for batch_idx, (images, targets) in enumerate(data_loader):
+
+            # Add debug BEFORE preparing annotations
+            if batch_idx == 0:
+                print(f"\n=== BATCH {batch_idx} DEBUG ===")
+                print(f"Number of images: {len(images)}")
+                print(f"Number of targets: {len(targets)}")
+                print(f"First target keys: {targets[0].keys() if len(targets) > 0 else 'EMPTY'}")
+                if len(targets) > 0 and 'annotations' in targets[0]:
+                    print(f"First target annotations: {len(targets[0]['annotations'])} annotations")
+                    if len(targets[0]['annotations']) > 0:
+                        print(f"First annotation: {targets[0]['annotations'][0]}")
+                print("===================\n")
+
             # Prepare data
             annotations = [{"image_id": i, "annotations": t["annotations"]}
                           for i, t in enumerate(targets)]
@@ -606,28 +618,37 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-# Alternative: If you want to skip tiles with no annotations during training
 def collate_fn_DETR_skip_empty(batch):
     """
     Collate function that SKIPS samples with no annotations during training.
     Use this if you want to avoid training on empty tiles.
     """
     filtered_batch = []
-
     for image, target in batch:
         # Skip if no annotations
         if "annotations" in target and len(target["annotations"]) > 0:
             filtered_batch.append((image, target))
 
-    # If all samples were empty, return a dummy batch
-    # (This shouldn't happen often with proper dataset filtering)
+    # If all samples were empty, find ANY sample with annotations from original batch
     if len(filtered_batch) == 0:
-        print("WARNING: Empty batch after filtering, using first sample from original batch")
-        filtered_batch = [batch[0]]
+        print("WARNING: Empty batch after filtering")
+        # Try to find at least one sample with annotations
+        for image, target in batch:
+            if "annotations" in target and len(target["annotations"]) > 0:
+                filtered_batch = [(image, target)]
+                break
+
+        # If still nothing, create a dummy annotation (shouldn't happen)
+        if len(filtered_batch) == 0:
+            print("ERROR: All samples in batch have no annotations!")
+            image, target = batch[0]
+            # Add a dummy annotation to prevent crash
+            if "annotations" not in target or len(target["annotations"]) == 0:
+                target = {"annotations": []}  # Empty but with correct structure
+            filtered_batch = [(image, target)]
 
     images = []
     targets = []
-
     for image, target in filtered_batch:
         if isinstance(image, torch.Tensor):
             images.append(image)

@@ -243,10 +243,6 @@ class TDDETRDataset(TDDataset):
     def __getitem__(self, idx):
         """
         Returns image and annotations in COCO format with masks.
-
-        Returns:
-            image: numpy array of the image
-            target: dict with 'annotations' key containing bbox + segmentation info
         """
         # Load image
         img_path = self.imageNameList[idx]
@@ -259,14 +255,25 @@ class TDDETRDataset(TDDataset):
         # Read box information from text file
         boxesRaw = readBB(self.boxNameList[idx])
 
+       # DEBUG: Print first 5 samples
+        if idx < 5:
+            print(f"\n=== DEBUG Sample {idx} ===")
+            print(f"Image: {os.path.basename(img_path)}, Size: {img.size}")
+            print(f"Number of raw boxes: {len(boxesRaw)}")
+            if len(boxesRaw) > 0:
+                print(f"First raw box: {boxesRaw[0]}")
+                print(f"All raw boxes: {boxesRaw}")
+
         annotations = []
+
+        # FIXED: boxes are in format cat, px, py, w, h (NOT xyxy!)
         for cat, px, py, w, h in boxesRaw:
             # Skip degenerate boxes
             if w <= 1 or h <= 1:
                 continue
 
             # Map category using class dictionary if available
-            category_id = self.classDict.get(cat, cat) if len(self.classDict) > 0 else cat
+            category_id = (self.classDict.get(cat, cat) if len(self.classDict) > 0 else cat) - 1
 
             # COCO format bbox: [x, y, width, height]
             bbox = [float(px), float(py), float(w), float(h)]
@@ -294,7 +301,6 @@ class TDDETRDataset(TDDataset):
         target = {"annotations": annotations}
 
         return image, target
-
 
 
 
