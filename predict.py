@@ -175,110 +175,145 @@ def predict_new_Set_yolo(conf):
             #boxesToTextFile(result,predict_dir+'/predictions_list_' + currentmodel + '_' + os.path.basename(imPath) +'.txt')
             outMask = boxesToMaskFile(result,predict_dir+'/PROVM' + currentmodel + '_' + os.path.basename(imPath) +'.png',image.shape)
 
-def predict_yolo(conf, prefix = 'combined_data_'):
+def build_slices_to_images_map(image_list):
+    """Build mapping from original images to their tiles.
 
-    #testPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"images")
-    #boxPath = os.path.join(conf["TV_dir"],conf["Test_dir"],"labels")
-    testPath = os.path.join(conf["Test_dir"],"images")
-    boxPath = os.path.join(conf["Test_dir"],"labels")
-    testImageList = testFileList(testPath)
+    Returns tuples of (imageName, maskName, boxName) as basenames only,
+    since rebuildImageFromTiles expects basenames and reads from predFolder.
+    """
+    from collections import defaultdict
+    slices_map = defaultdict(list)
+
+    for imPath in image_list:
+        imageName = os.path.basename(imPath)
+        # Extract site name (everything before 'x' coordinate)
+        siteName = imageName[:imageName.find("x")] if "x" in imageName else imageName[:-4]
+
+        # Use basenames only - rebuildImageFromTiles reads from predFolder
+        maskName = f"PREDMASK{imageName}"
+        boxName = f"BOXCOORDS{imageName[:-4]}.txt"
+
+        slices_map[siteName].append((imageName, maskName, boxName))
+
+    return slices_map
+
+
+def process_single_image(imPath, detectionModel, boxPath, predict_dir, currentmodel,
+                         totalTP, totalFP, totalFN, dScore, invScore):
+    """Process a single image: predict, filter, evaluate, and save."""
+    image = cv2.imread(imPath)
+    imageName = os.path.basename(imPath)
+    height, width = image.shape[:2]
+
+    # Get ground truth and predictions
+    gtBoxes = fileToBoxCoords(
+        os.path.join(boxPath, imageName[:-4] + ".txt"),
+        returnCat=False, yoloToXYXY=True, imgSize=(width, height)
+    )
+
+    result = get_sliced_prediction(
+        image, detectionModel, slice_height=512, slice_width=512,
+        overlap_height_ratio=0.2, overlap_width_ratio=0.2, verbose=False
+    )
+
+    # Filter predictions and extract box data
+    predBoxes = []
+    boxCatAndCoords = []
+    for p in result.object_prediction_list:
+        box = p.bbox.to_xyxy()
+        if not borderbox(box, width, height):
+            predBoxes.append(box)
+            boxCatAndCoords.append(tuple(box) + (p.category.id,))
+
+    # Save outputs
+    save_prediction_outputs(predict_dir, imageName, predBoxes, boxCatAndCoords, image)
+
+    # Visualize (optional)
+    visualize_object_predictions(
+        image=np.ascontiguousarray(result.image),
+        object_prediction_list=result.object_prediction_list,
+        rect_th=2, text_size=0.8, text_th=1, color=(255, 0, 0),
+        output_dir=predict_dir,
+        file_name=f'boxes_{currentmodel}_{imageName}',
+        export_format='png'
+    )
+
+    # Evaluate
+    if len(gtBoxes) > 0:
+        TP, FP, FN = boxListEvaluation(predBoxes, gtBoxes)
+        totalTP += TP
+        totalFP += FP
+        totalFN += FN
+
+        dS, invS = boxListEvaluationCentroids(predBoxes, gtBoxes)
+        dScore.append(dS)
+        invScore.append(invS)
+
+    return totalTP, totalFP, totalFN
+
+
+def save_prediction_outputs(predict_dir, imageName, predBoxes, boxCatAndCoords, image):
+    """Save prediction masks, boxes, and images."""
+    boxCoordsToFile(
+        os.path.join(predict_dir, f"BOXCOORDS{imageName[:-4]}.txt"),
+        boxCatAndCoords
+    )
+
+    predMask = maskFromBoxes(predBoxes, image.shape)
+    cv2.imwrite(os.path.join(predict_dir, f"PREDMASK{imageName}"), predMask)
+    cv2.imwrite(os.path.join(predict_dir, imageName), image)
+
+
+def predict_yolo(conf, prefix='combined_data_'):
+    """YOLO prediction with full image reconstruction from tiles."""
+    # Setup paths
+    testPath = os.path.join(conf["Test_dir"], "images")
+    boxPath = os.path.join(conf["Test_dir"], "labels")
     predict_dir = conf["Pred_dir"]
 
-    print(testPath)
-    #create predictions dir if it does not exist
     Path(predict_dir).mkdir(parents=True, exist_ok=True)
-    dScore = []
-    invScore = []
-    totalTP, totalFP, totalFN = 0, 0, 0
+    Path(os.path.join(predict_dir, "FULL")).mkdir(parents=True, exist_ok=True)
 
-    # Use the prefix parameter directly
-    currentmodel = prefix
-
-    # Use the same key that train_YOLO uses
+    # Load model
     train_res_key = "Train_res" if "Train_res" in conf else "trainResFolder"
-    modelpath = os.path.join(conf[train_res_key], "detect", currentmodel, "weights", "best.pt")
-    print(f"predict_yolo: Loading model from {modelpath}")
+    modelpath = os.path.join(conf[train_res_key], "detect", prefix, "weights", "best.pt")
+    print(f"Loading model from {modelpath}")
 
-    # Verify model exists
     if not Path(modelpath).exists():
         raise FileNotFoundError(f"Model not found at: {modelpath}")
 
     detectionModel = AutoDetectionModel.from_pretrained(
-        model_type='yolov8',
-        model_path=modelpath,
-        device=0
+        model_type='yolov8', model_path=modelpath, device=0
     )
 
+    # Build tile mapping and process images
+    testImageList = testFileList(testPath)
+    slicesToImages = build_slices_to_images_map(testImageList)
+
+    totalTP, totalFP, totalFN = 0, 0, 0
+    dScore, invScore = [], []
+
     for imPath in testImageList:
-        image = cv2.imread(imPath)
-        #gtBoxes = fileToBoxCoords(os.path.join(boxPath,os.path.basename(imPath)[:-4]+".txt"),returnCat = False)
-        gtBoxes = fileToBoxCoords(os.path.join(boxPath,os.path.basename(imPath)[:-4]+".txt"), returnCat = False, yoloToXYXY=True, imgSize=(image.shape[1], image.shape[0]))
-
-        result = get_sliced_prediction(image,detectionModel,slice_height=512
-        ,slice_width=512,overlap_height_ratio=0.2,overlap_width_ratio=0.2,
-        verbose = False )
-
-        predBoxes = [ p.bbox.to_xyxy() for p in result.object_prediction_list ] # change from the sahi prediction thing to a list of tuples (int this case, ignore category)
-        boxesToTextFile(result,predict_dir+'/predictions_list_' + currentmodel + '_' + os.path.basename(imPath) +'.txt')
-
-        if len(gtBoxes) > 0:
-            TP,FP,FN = boxListEvaluation(predBoxes,gtBoxes)
-            #update totals
-            totalTP += TP
-            totalFP += FP
-            totalFN += FN
-
-            #print("\n\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ there were "+str(len(gtBoxes)))
-            #print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ TP,FP,FN "+str((TP,FP,FN)))
-
-
-            # at the moment not computing centroid based metrics for yolo
-            dS, invS = boxListEvaluationCentroids(predBoxes,gtBoxes)
-            dScore.append(dS)
-            invScore.append(invS)
-        #else:
-            #print("predict_yolo found a GT tile wihtout boxes")
-
-        """
-        outMask = boxesToMaskFile(result,predict_dir+'/MASK' + currentmodel + '_' + os.path.basename(imPath) +'.png',image.shape)
-
-        # evaluate
-        gtMaskPath = os.path.join(maskPath,maskName)
-        gtMask = cv2.imread(gtMaskPath,0)
-        try:
-            dScore.append(boxesFound(gtMask,outMask, percentage = False))
-            invScore.append(boxesFound(outMask,gtMask, percentage = False))
-        except:
-            print("image with no boxes, ignoring "+str(ignoreCount))
-            ignoreCount+=1
-        """
-
-        visualize_object_predictions(
-            image=np.ascontiguousarray(result.image),
-            object_prediction_list=result.object_prediction_list,
-            rect_th=2,
-            text_size=0.8,
-            text_th=1,
-            color=(255,0,0),
-            output_dir=predict_dir,
-            file_name='boxes_' + currentmodel + '_' +os.path.basename(imPath),
-            export_format='png'
+        totalTP, totalFP, totalFN = process_single_image(
+            imPath, detectionModel, boxPath, predict_dir, prefix,
+            totalTP, totalFP, totalFN, dScore, invScore
         )
 
-    # computations
-    #print(invScore)
-    #print(dScore)
+    # Reconstruct full images
+    print("\nReconstructing full images from tiles...")
+    for imageN, TileList in slicesToImages.items():
+        rebuildImageFromTiles(imageN, TileList, predict_dir)
 
-    print("average Precision (centroids) "+str(sum(dScore) / len(dScore)))
-    print("average Recall (centroids) "+str(sum(invScore) / len(invScore)))
+    # Compute and return metrics
+    prec = totalTP / (totalTP + totalFP) if (totalTP + totalFP) > 0 else 0
+    rec = totalTP / (totalTP + totalFN) if (totalTP + totalFN) > 0 else 0
 
-    prec = 0 if (totalTP+totalFP) == 0 else totalTP/(totalTP+totalFP)
-    rec = 0 if (totalTP+totalFN) == 0 else totalTP/(totalTP+totalFN)
+    print(f"average Precision (centroids): {sum(dScore) / len(dScore)}")
+    print(f"average Recall (centroids): {sum(invScore) / len(invScore)}")
+    print(f"global Precision (overlap): {prec}")
+    print(f"global Recall (overlap): {rec}")
 
-    print("global Precision (overlap) "+str(prec))
-    print("global Recall (overlap) "+str(rec))
-
-    return sum(dScore) / len(dScore), sum(invScore) / len(invScore) , prec, rec
+    return sum(dScore) / len(dScore), sum(invScore) / len(invScore), prec, rec
 
 
 @torch.no_grad()
@@ -559,104 +594,6 @@ def predict_DETR(dataset_test, model, processor, device=None, predConfidence=0.5
             sum(invScore)/len(invScore) if invScore else 0,
             prec, rec)
 
-
-def predict_DeformableDETR_FIXED(dataset_test, model, processor, device=None,
-                                  predConfidence=0.5, predFolder=None, origFolder=None,
-                                  max_detections=100, nms_threshold=0.5):
-    """
-    Fixed prediction for Deformable DETR
-    """
-
-    print("Starting Deformable DETR prediction")
-
-    if device is None:
-        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-    # Add diagnostic for first batch
-    for ind in range(min(1, len(dataset_test))):
-        # Get data
-        image_data, target = dataset_test[ind]
-        imageName = dataset_test.imageNameList[ind].split(os.sep)[-1]
-
-        # Convert to proper format
-        if isinstance(image_data, torch.Tensor):
-            if image_data.shape[0] == 3:  # (C, H, W)
-                imToStore = image_data.permute(1, 2, 0).cpu().numpy()
-            else:
-                imToStore = image_data.cpu().numpy()
-        else:
-            imToStore = np.array(image_data)
-
-        # Ensure uint8
-        if imToStore.dtype != np.uint8:
-            if imToStore.max() <= 1.0:
-                imToStore = (imToStore * 255).astype(np.uint8)
-            else:
-                imToStore = imToStore.astype(np.uint8)
-
-        orig_height, orig_width = imToStore.shape[:2]
-
-        # CRITICAL FIX: Convert to PIL Image for the processor
-        pil_image = Image.fromarray(imToStore)
-
-        # Process - pass PIL Image, not numpy array
-        encoding = processor(images=pil_image, return_tensors="pt", do_rescale=True).to(device)
-        pixel_values = encoding["pixel_values"]
-
-        # Forward pass
-        outputs = model(pixel_values=pixel_values)
-
-        print("\n" + "="*70)
-        print("DEFORMABLE DETR OUTPUT DIAGNOSTIC")
-        print("="*70)
-        print(f"Image: {imageName}")
-        print(f"Original size: {orig_width}×{orig_height}")
-        print(f"Processed size: {pixel_values.shape}")
-        print(f"Output keys: {outputs.keys()}")
-        print(f"Logits shape: {outputs.logits.shape}")
-        print(f"Pred boxes shape: {outputs.pred_boxes.shape}")
-
-        # Check logits values
-        logits = outputs.logits[0]
-        print(f"Logits min/max: [{logits.min().item():.4f}, {logits.max().item():.4f}]")
-
-        # Check probabilities
-        probs = logits.softmax(-1)
-        print(f"Probs shape: {probs.shape}")
-        print(f"Num classes in output: {probs.shape[-1]}")
-
-        # For single-class detection with num_labels=1:
-        # probs should be shape [num_queries, 2] where:
-        # - probs[:, 0] = probability of object (class 0)
-        # - probs[:, 1] = probability of no-object
-
-        if probs.shape[-1] == 2:
-            # Correct: single class + no-object
-            scores_class0 = probs[:, 0]
-            print(f"✓ Single-class mode detected (correct: 2 output dims)")
-        elif probs.shape[-1] == 1:
-            # Wrong: only one output - this is the bug!
-            print(f"✗ ERROR: Only 1 output dimension! Model needs retraining with fixed config")
-            print(f"   Current model outputs {probs.shape[-1]} class, should be 2 (object + no-object)")
-            print(f"   All scores will be 1.0 due to softmax on single value")
-            print(f"   SOLUTION: Delete the .pth file and retrain with the fixed training code")
-            scores_class0 = probs[:, 0]
-        else:
-            # Multi-class (shouldn't happen with num_labels=1)
-            print(f"WARNING: Expected 2 classes (object/no-object) but got {probs.shape[-1]}")
-            scores_class0 = probs[:, 0]
-
-        print(f"Class 0 scores: min={scores_class0.min().item():.4f}, max={scores_class0.max().item():.4f}")
-        print(f"Predictions with score>0.5: {(scores_class0 > 0.5).sum().item()}")
-        print(f"Predictions with score>0.9: {(scores_class0 > 0.9).sum().item()}")
-        print(f"Predictions with score>0.99: {(scores_class0 > 0.99).sum().item()}")
-
-        # Check predicted boxes
-        boxes = outputs.pred_boxes[0]
-        print(f"Boxes (first 5): {boxes[:5].tolist()}")
-        print("="*70 + "\n")
-
-        break
 
 @torch.no_grad()
 def predict_pytorch_maskRCNN(dataset_test, model, device, predConfidence):

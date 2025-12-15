@@ -8,14 +8,14 @@ import torch
 from pathlib import Path
 from itertools import product
 
-from datasets import TDDataset
+from datasets import TDDataset, TDDETRDataset
 
 from config import read_config
 #from imageUtils import boxesFound,read_Binary_Mask,recoupMasks
-from train import train_YOLO,makeTrainYAML, get_transform, train_pytorchModel,train_DETR, train_DeformableDETR
+from train import train_YOLO,makeTrainYAML, get_transform, train_pytorchModel,train_DETR
 
 from dataHandling import paramsDictToString
-from predict import predict_yolo, predict_pytorch, predict_DETR, predict_DeformableDETR_FIXED
+from predict import predict_yolo, predict_pytorch, predict_DETR
 
 #from transformers import DetrForObjectDetection, DetrImageProcessor, DeformableDetrImageProcessor
 
@@ -166,7 +166,8 @@ class DETRExperiment(ModelExperiment):
         if self.conf["Train"] or train_again:
             start = time.time()
             train_dir = os.path.join(self.conf["TV_dir"], self.conf["Train_dir"])
-            detr_dataset = ODDETRDataset(train_dir, True, self.conf["slice"], get_transform())
+            detr_dataset = TDDETRDataset(dataFolder = train_dir, verbose = True, slice = self.conf["slice"],
+            transform = get_transform(),include_masks=True)
 
             train_params = {
                 "file_path": file_path,
@@ -194,7 +195,9 @@ class DETRExperiment(ModelExperiment):
         # Testing
         start = time.time()
         test_dir = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"])
-        test_dataset = ODDETRDataset(test_dir, True, self.conf["slice"], get_transform())
+        test_dataset = TDDETRDataset(dataFolder = test_dir, verbose = True, slice = self.conf["slice"],
+        transform = get_transform(),include_masks=True)
+
         pred_folder = os.path.join(self.conf["Pred_dir"], "DETR_exp" + paramsDictToString(params))
         orig_folder = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"], "images")
 
@@ -256,12 +259,12 @@ def MODULARDLExperiment(conf, yolo_params=None, pytorch_params=None, detr_params
         print(f"\n=== Running PyTorch Model Experiment ===")
         print(f"Parameters: {pytorch_params}")
         experiment = PyTorchModelExperiment(conf, device)
-        #try:
-        metrics, train_time, test_time = experiment.train_and_test(pytorch_params)
-        experiment.write_results(pytorch_params, metrics, train_time, test_time)
-        print(f"PyTorch Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
-        #except Exception as e:
-        #    print(f"PyTorch experiment failed: {e}")
+        try:
+            metrics, train_time, test_time = experiment.train_and_test(pytorch_params)
+            experiment.write_results(pytorch_params, metrics, train_time, test_time)
+            print(f"PyTorch Results: Precision={metrics['oprec']:.3f}, Recall={metrics['orec']:.3f}")
+        except Exception as e:
+            print(f"PyTorch experiment failed: {e}")
 
     # Run DETR experiment
     if detr_params:

@@ -220,6 +220,83 @@ class TDDataset(Dataset):
             # Save to disk
             to_pil_image(img_with_boxes).save(os.path.join(output_dir, f"img_{idx:04d}.png"))
 
+class TDDETRDataset(TDDataset):
+    """
+    Extended version that also includes segmentation masks in COCO format.
+    Use this if your DETR model supports instance segmentation.
+
+    Can safely be used for detection-only tasks - the segmentation field
+    will simply be ignored by detection models.
+    """
+
+    def __init__(self, dataFolder=None, slice=1000, transform=None,
+                 classDictFile="", verbose=False, include_masks=False):
+        """
+        Args:
+            include_masks (bool): If False, behaves like TDDETRDataset (no masks).
+                                 If True, includes segmentation masks.
+                                 Default True for flexibility.
+        """
+        super().__init__(dataFolder, slice, transform, classDictFile, verbose)
+        self.include_masks = include_masks
+
+    def __getitem__(self, idx):
+        """
+        Returns image and annotations in COCO format with masks.
+
+        Returns:
+            image: numpy array of the image
+            target: dict with 'annotations' key containing bbox + segmentation info
+        """
+        # Load image
+        img_path = self.imageNameList[idx]
+        img = Image.open(img_path).convert("RGB")
+
+        # Load label image
+        label_path = self.labelNameList[idx]
+        labelIm = cv2.imread(label_path, cv2.IMREAD_UNCHANGED)
+
+        # Read box information from text file
+        boxesRaw = readBB(self.boxNameList[idx])
+
+        annotations = []
+        for cat, px, py, w, h in boxesRaw:
+            # Skip degenerate boxes
+            if w <= 1 or h <= 1:
+                continue
+
+            # Map category using class dictionary if available
+            category_id = self.classDict.get(cat, cat) if len(self.classDict) > 0 else cat
+
+            # COCO format bbox: [x, y, width, height]
+            bbox = [float(px), float(py), float(w), float(h)]
+
+            annotation = {
+                "bbox": bbox,
+                "category_id": int(category_id),
+                "iscrowd": 0
+            }
+
+            # Only extract masks if requested
+            if self.include_masks:
+                mask = extractMask(labelIm, (px, py, w, h, cat))
+                area = float(np.sum(mask > 0))  # More accurate from mask
+                annotation["segmentation"] = mask
+                annotation["area"] = area
+            else:
+                # Calculate area from bbox
+                annotation["area"] = float(w * h)
+
+            annotations.append(annotation)
+
+        # Return as numpy array
+        image = np.array(img)
+        target = {"annotations": annotations}
+
+        return image, target
+
+
+
 
 if __name__ == '__main__':
 
