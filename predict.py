@@ -857,13 +857,12 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
 
 
                 boxCatAndCoords = []
-
                 # create a new list of tuples with category predictions to save to file
-                for el,tup in zip(correctedLabels, correctedBoxes):
-                    # convert so they are not tensors
-                    el = el.tolist()
-                    tup = tuple(tup.tolist())
-                    boxCatAndCoords.append(tup+(el,))
+                # Format: (x1, y1, x2, y2, cat) so boxCoordsToFile writes as "cat x1 y1 x2 y2"
+                for el, tup in zip(correctedLabels, correctedBoxes):
+                    cat = el.tolist()  # category
+                    x1, y1, x2, y2 = tup.tolist()  # box coordinates in XYXY format
+                    boxCatAndCoords.append((x1, y1, x2, y2, cat))
 
                 thisPrec = 0 if (TP+FP) == 0 else (TP/(TP+FP))
                 precList.append(thisPrec)
@@ -884,7 +883,8 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 boxCoordsToFile(os.path.join(predFolder,"BOXCOORDS"+imageName[:-4]+".txt"),[])
 
             # always store the tile
-            cv2.imwrite( os.path.join(predFolder,imageName), imToStore*255 )
+            #cv2.imwrite( os.path.join(predFolder,imageName), imToStore*255 )
+            cv2.imwrite( os.path.join(predFolder,imageName), cv2.cvtColor((imToStore*255).astype(np.uint8), cv2.COLOR_RGB2BGR) )
 
             # clean up
             del outputs
