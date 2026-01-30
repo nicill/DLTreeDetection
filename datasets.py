@@ -78,8 +78,8 @@ class TDDataset(Dataset):
 
         # class dictionary
         self.classDict = {} if classDictFile == "" else readClassDict(classDictFile)
-        self.numClasses = max(self.classDict.values()) + 1 if len(self.classDict) > 0 else self.findMaxClass() + 1 # the +1 are there to account for the background class
-        self.numClasses = self.findMaxClass() + 1 # the +1 are there to account for the background class
+        self.numClasses = max(self.classDict.values()) + 1 if len(self.classDict) > 0 else self.findMaxClass() + 1 # the +1 is there to account for the background class
+        self.numClasses = self.findMaxClass() + 1 # the +1 is there to account for the background class
 
         if verbose:
             print("\n\n\n")
