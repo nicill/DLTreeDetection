@@ -199,7 +199,7 @@ def build_slices_to_images_map(image_list):
 
 
 def process_single_image(imPath, detectionModel, boxPath, predict_dir, currentmodel,
-                         totalTP, totalFP, totalFN, dScore, invScore):
+                         totalTP, totalFP, totalFN, dScore, invScore, sliceSize = 1024):
     """Process a single image: predict, filter, evaluate, and save."""
     image = cv2.imread(imPath)
     imageName = os.path.basename(imPath)
@@ -212,7 +212,7 @@ def process_single_image(imPath, detectionModel, boxPath, predict_dir, currentmo
     )
 
     result = get_sliced_prediction(
-        image, detectionModel, slice_height=512, slice_width=512,
+        image, detectionModel, slice_height=sliceSize, slice_width=sliceSize,
         overlap_height_ratio=0.2, overlap_width_ratio=0.2, verbose=False
     )
 
@@ -296,7 +296,7 @@ def predict_yolo(conf, prefix='combined_data_'):
     for imPath in testImageList:
         totalTP, totalFP, totalFN = process_single_image(
             imPath, detectionModel, boxPath, predict_dir, prefix,
-            totalTP, totalFP, totalFN, dScore, invScore
+            totalTP, totalFP, totalFN, dScore, invScore, sliceSize=conf["slice"]
         )
 
     # Reconstruct full images
