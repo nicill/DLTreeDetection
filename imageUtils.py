@@ -390,11 +390,11 @@ def boxListEvaluationCentroids(bPred, bGT):
 
     return precision,recall
 
-def rebuildImageFromTiles(imageN,TileList,predFolder):
+def rebuildImageFromTiles(imageN, TileList, predFolder):
     """
-        Receive an imageName (image to build)
-        and a list of tiles (as file Names)
-        those tile names contain the first
+    Receive an imageName (image to build)
+    and a list of tiles (as file Names)
+    those tile names contain the first
     """
     def get_original_image_size(filenames, folder_path):
         """
@@ -410,87 +410,118 @@ def rebuildImageFromTiles(imageN,TileList,predFolder):
         max_right = 0
         max_bottom = 0
 
-        for fname in filenames: # in this case filenames contains a list of tuples with the names of images, label images and box list text files
-            # Extract x and y using regex
-            match = re.search(r'x(\d+)y(\d+)', fname[0]) #first postion of the tuple contains image name
+        for fname in filenames:
+            match = re.search(r'x(\d+)y(\d+)', fname[0])
             if not match:
                 raise ValueError(f"Filename '{fname[0]}' does not match 'x<num>y<num>' pattern.")
 
             x, y = int(match.group(1)), int(match.group(2))
-
-            # Read image using OpenCV
             image_path = os.path.join(folder_path, fname[0])
             img = cv2.imread(image_path)
             if img is None:
                 raise FileNotFoundError(f"Could not read image: {image_path}")
 
             tile_height, tile_width = img.shape[:2]
-
-            # Compute max extent of the image
             max_right = max(max_right, x + tile_width)
             max_bottom = max(max_bottom, y + tile_height)
 
         return max_right, max_bottom
 
-    # Get final image dimensions
+    def stitch_mask(TileList, predFolder, full_height, full_width, mask_prefix):
+        """Stitch mask tiles into full image"""
+        stitched_mask = np.ones((full_height, full_width), dtype=np.uint8) * 255
+        
+        for fname in TileList:
+            match = re.search(r'x(\d+)y(\d+)', fname[0])
+            x, y = int(match.group(1)), int(match.group(2))
+            
+            # Construct mask filename
+            if mask_prefix == "PREDMASK":
+                image_basename = os.path.basename(fname[0])
+                mask_path = os.path.join(predFolder, f"{mask_prefix}{image_basename}")
+            else:  # Ground truth mask
+                mask_path = os.path.join(predFolder, fname[1])
+            
+            tileMask = cv2.imread(mask_path, 0)
+            if tileMask is None:
+                continue
+                
+            h, w = tileMask.shape[:2]
+            stitched_maskAUX = np.ones((full_height, full_width), dtype=np.uint8) * 255
+            stitched_maskAUX[y:y+h, x:x+w] = tileMask
+            stitched_mask[stitched_maskAUX == 0] = 0
+        
+        return stitched_mask
+
+    def stitch_image_and_boxes(TileList, predFolder, imageN, full_height, full_width):
+        """Stitch image tiles and collect box coordinates"""
+        stitched_image = np.zeros((full_height, full_width, 3), dtype=np.uint8)
+        boxCoords = []
+
+        for fname in TileList:
+            match = re.search(r'x(\d+)y(\d+)', fname[0])
+            x, y = int(match.group(1)), int(match.group(2))
+            
+            # Read and stitch image tile
+            tile = cv2.imread(os.path.join(predFolder, fname[0]))
+            if tile is None:
+                raise FileNotFoundError(f"Could not read image: {fname[0]}")
+            
+            h, w = tile.shape[:2]
+            stitched_image[y:y+h, x:x+w] = tile
+
+            # Read and adjust box coordinates
+            boxPredFile = os.path.join(predFolder, f"BOXCOORDS{imageN}x{x}y{y}.txt")
+            with open(boxPredFile) as f:
+                for line in f.readlines():
+                    c, px, py, w, h = tuple(line.strip().split(" "))
+                    boxCoords.append((str(int(float(px)) + x), str(int(float(py)) + y), w, h, c))
+
+        return stitched_image, boxCoords
+
+    # Get dimensions
     full_width, full_height = get_original_image_size(TileList, predFolder)
 
-    # Prepare black canvas
-    stitched_image = np.zeros((full_height, full_width, 3), dtype=np.uint8)
-    stitched_mask = np.ones((full_height, full_width), dtype=np.uint8)
-    stitched_mask = stitched_mask*255
+    # Stitch components
+    stitched_image, boxCoords = stitch_image_and_boxes(TileList, predFolder, imageN, full_height, full_width)
+    stitched_pred_mask = stitch_mask(TileList, predFolder, full_height, full_width, "PREDMASK")
+    stitched_gt_mask = stitch_mask(TileList, predFolder, full_height, full_width, "GTMASK")
 
-    # list of boxes in the original image coordinates
-    boxCoords = []
-
-    for fname in TileList: # TileList contains a list of tuples with the names of images, label images and box list text files
-
-        match = re.search(r'x(\d+)y(\d+)', fname[0])
-        if not match:
-            raise ValueError(f"Filename '{fname[0]}' does not contain valid 'x<num>y<num>' format.")
-
-        x, y = int(match.group(1)), int(match.group(2))
-        image_path = os.path.join(predFolder, fname[0]) # first element in the tuple contains the image name
-        tile = cv2.imread(image_path)
-        tileMask = cv2.imread(os.path.join(predFolder, fname[1]),0)  # second element in the tuple contains the label image name
-
-        if tile is None:
-            raise FileNotFoundError(f"Could not read image: {image_path}")
-
-        h, w = tile.shape[:2]
-        stitched_image[y:y+h, x:x+w] = tile
-
-        # make sure to overlap all mask predictions
-        stitched_maskAUX = np.ones((full_height, full_width), dtype=np.uint8)
-        stitched_maskAUX[y:y+h, x:x+w] = tileMask
-        stitched_mask[ stitched_maskAUX == 0 ] = 0
-        #stitched_mask[y:y+h, x:x+w] = tileMask
-
-        # also read box coords
-        boxPredFile = os.path.join(predFolder, "BOXCOORDS"+imageN+"x"+str(x)+"y"+str(y)+".txt") # here we are reading from the tile predicted box file to create a full predicted box file
-        with open(boxPredFile) as f:
-            for line in f.readlines():
-                c,px1,py1,px2,py2 = tuple(line.strip().split(" "))
-                newP1 = (int(float(px1) + float(x)), int(float(py1) + float(y)))
-                newP2 = (int(float(px2) + float(x)), int(float(py2) + float(y)))
-
-                boxCoords.append((c,str(newP1[0]),str(newP1[1]),str(newP2[0]),str(newP2[1])))
-
-    # write to disk (image, mask, bounding box file)
-    cv2.imwrite(os.path.join(predFolder,"FULL",imageN+".png"),stitched_image )
-    cv2.imwrite(os.path.join(predFolder,"FULL","PREDMASK"+imageN+".png"),stitched_mask )
-    boxCoordsToFile(os.path.join(predFolder,"FULL","BOXCOORDS"+imageN+".txt"),boxCoords)
-    # also, make a pretty image of the original image with boxes and categories
-    cv2.imwrite(os.path.join(predFolder,"FULL","Pretty"+imageN+".png"), prettyImage(boxCoords,stitched_image) )
-
-def prettyImage(boxes, image, color = 125, thickness=4, font_scale=0.5, font_thickness=3):
+    # Save outputs
+    output_dir = os.path.join(predFolder, "FULL")
+    cv2.imwrite(os.path.join(output_dir, f"{imageN}.png"), stitched_image)
+    cv2.imwrite(os.path.join(output_dir, f"PREDMASK{imageN}.png"), stitched_pred_mask)
+    cv2.imwrite(os.path.join(output_dir, f"GTMASK{imageN}.png"), stitched_gt_mask)
+    boxCoordsToFile(os.path.join(output_dir, f"BOXCOORDS{imageN}.txt"), boxCoords)
+    
+    # Create pretty image with boxes
+    boxCoords_for_display = [(px, py, w, h, c) for px, py, w, h, c in boxCoords]
+    cv2.imwrite(
+        os.path.join(output_dir, f"Pretty{imageN}.png"),
+        prettyImage(boxCoords_for_display, stitched_image, format=1)
+    )
+    
+def prettyImage(boxes, image, color=125, thickness=4, font_scale=0.5, font_thickness=3, format=0):
     """
-        Draw bounding box countours on image
-        box format is p1x,p1y,p2x,p2y
+    Draw bounding box contours on image
+    Args:
+        boxes: List of box tuples
+        image: Image to draw on
+        format: 0 for XYXY (x1, y1, x2, y2, cat), 1 for XYWH (x, y, width, height, cat)
     """
+    if format not in [0, 1]:
+        raise ValueError(f"format must be 0 (XYXY) or 1 (XYWH), got {format}")
+    
     for tup in boxes:
-        category = tup[0]
-        px1, py1, px2, py2 = map(float, tup[1:])
+        category = tup[-1]  # Category is always last
+        
+        if format == 0:  # XYXY format: (x1, y1, x2, y2, cat)
+            px1, py1, px2, py2 = map(float, tup[:-1])
+        elif format == 1:  # XYWH format: (x, y, w, h, cat)
+            px, py, w, h = map(float, tup[:-1])
+            px1, py1 = px, py
+            px2, py2 = px + w, py + h
+        
         top_left = (int(px1), int(py1))
         bottom_right = (int(px2), int(py2))
 
@@ -506,7 +537,6 @@ def prettyImage(boxes, image, color = 125, thickness=4, font_scale=0.5, font_thi
                     font_scale, color, font_thickness, lineType=cv2.LINE_AA)
 
     return image
-
 
 def maskFromBoxes(boxes, image_size):
     """

@@ -105,7 +105,7 @@ class TDDataset(Dataset):
         #print(label_path)
         labelIm = cv2.imread(label_path,cv2.IMREAD_UNCHANGED)
 
-        boxesRaw = readBB(self.boxNameList[idx]) # raw boxes are px,py,w,h,cat
+        boxesRaw = readBB(self.boxNameList[idx]) # raw boxes are cat,px,py,w,h and readBB does not change the format
 
         #print(boxes)
         #sys.exit()
@@ -120,7 +120,7 @@ class TDDataset(Dataset):
         masks = []
         for  cat,px,py,w,h in boxesRaw:
             l = self.classDict[cat] if len(self.classDict) > 0 else cat # look up the label corresponding to this category if necessary
-            boxes.append([px, py,px + w, py + h])
+            boxes.append([px, py,px + w, py + h]) # convert from xywh to xyxy for pytorch detectors
             labels.append(l)
             masks.append(extractMask(labelIm,(px,py,w,h,cat)))
         # transform labels and masks to torch tensor

@@ -855,14 +855,12 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
                 #print("targets")
                 #print(targets[0]["boxes"])
 
-
                 boxCatAndCoords = []
-                # create a new list of tuples with category predictions to save to file
-                # Format: (x1, y1, x2, y2, cat) so boxCoordsToFile writes as "cat x1 y1 x2 y2"
+                # Format: (px, py, w, h, cat) to match training data format "cat x y width height"
                 for el, tup in zip(correctedLabels, correctedBoxes):
-                    cat = el.tolist()  # category
-                    x1, y1, x2, y2 = tup.tolist()  # box coordinates in XYXY format
-                    boxCatAndCoords.append((x1, y1, x2, y2, cat))
+                    cat = el.tolist()
+                    x1, y1, x2, y2 = tup.tolist()
+                    boxCatAndCoords.append((x1, y1, x2 - x1, y2 - y1, cat))
 
                 thisPrec = 0 if (TP+FP) == 0 else (TP/(TP+FP))
                 precList.append(thisPrec)
@@ -907,8 +905,8 @@ def predict_pytorch(dataset_test, model, device, predConfidence, postProcess, pr
     print("average Precision (centroids) "+str(sum(dScore) / len(dScore)))
     print("average Recall (centroids) "+str(sum(invScore) / len(invScore)))
 
-    print(precList)
-    print(recList)
+    #print(precList)
+    #print(recList)
     print("average Precision (overlap) "+str(sum(precList) / len(precList)))
     print("average Recall (overlap) "+str(sum(recList) / len(recList)))
 
