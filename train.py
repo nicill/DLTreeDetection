@@ -22,6 +22,7 @@ from functools import partial
 from torchvision.models.detection import RetinaNet_ResNet50_FPN_V2_Weights
 from torchvision.models.detection.retinanet import RetinaNetClassificationHead
 from torchvision.models.detection.fcos import FCOSClassificationHead
+from torch.cuda.amp import GradScaler
 
 from utils import MetricLogger,SmoothedValue,warmup_lr_scheduler,reduce_dict
 import math
@@ -437,25 +438,18 @@ def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
 
         # construct an optimizer
         params = [p for p in model.parameters() if p.requires_grad]
-        optimizer = torch.optim.SGD(
-            params,
-            lr=0.005,
-            momentum=0.9,
-            weight_decay=0.0005
-        )
+        optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
+        scaler = torch.amp.GradScaler('cuda')
 
         # and a learning rate scheduler
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer,
-            step_size=3,
-            gamma=0.1
-        )
-
+        #lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,T_max=num_epochs, eta_min=1e-6)
+        
         # train
         for epoch in range(num_epochs):
             print("epoch "+str(epoch))
             # train for one epoch, printing every 10 iterations
-            train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10)
+            train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq=10, scaler = scaler)
             # update the learning rate
             lr_scheduler.step()
 
@@ -551,16 +545,14 @@ def train_pytorchModel(dataset, device, num_classes, file_path, num_epochs = 10,
             model.transform.max_size = size
         else: raise Exception(" train_pytorchModel, unrecognized model type "+str(mType))
 
-        #reload the model
-        model.to(device)
-
         # Load the saved state_dict into the model
-        model.load_state_dict(torch.load(file_path))
+        model.load_state_dict(torch.load(file_path, map_location='cpu'))
+        model.to(device)  # move to GPU after loading
         model.eval()  # Set the model to evaluation mode
-    return model
-    print("finished training")
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
+    return model
+
+def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, scaler=None):
     model.train()
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -570,21 +562,21 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
     if epoch == 0:
         warmup_factor = 1. / 1000
         warmup_iters = min(1000, len(data_loader) - 1)
-
         lr_scheduler = warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
 
     for images, targets in metric_logger.log_every(data_loader, print_freq, header):
         images = list(image.to(device) for image in images)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        loss_dict = model(images, targets)
+        optimizer.zero_grad()
 
-        losses = sum(loss for loss in loss_dict.values())
+        with torch.amp.autocast('cuda', enabled=scaler is not None):
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = reduce_dict(loss_dict)
         losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-
         loss_value = losses_reduced.item()
 
         if not math.isfinite(loss_value):
@@ -592,11 +584,15 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
             print(loss_dict_reduced)
             raise Exception("NAN LOSS in train one epoch")
 
-        optimizer.zero_grad()
-        losses.backward()
-        # gradient clipping!
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-        optimizer.step()
+        if scaler is not None:
+            scaler.scale(losses).backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            losses.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            optimizer.step()
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -604,13 +600,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
         metric_logger.update(loss=losses_reduced, **loss_dict_reduced)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        # memory cleanup
-        #del images
-        #del targets
-        #del loss_dict
-       #del losses
-    torch.cuda.empty_cache()
-
+        torch.cuda.empty_cache()
 
     return metric_logger
 

@@ -110,43 +110,36 @@ class PyTorchModelExperiment(ModelExperiment):
 
         train_again = not Path(file_path).is_file()
 
-        # Training
-        train_time = 0
-        if self.conf["Train"] or train_again:
+        model = None  # initialize before try block
+        try:
+            # Training
+            train_time = 0
             start = time.time()
-            model = train_pytorchModel(
-                dataset=self.dataset,
-                device=self.device,
-                num_classes=self.num_classes,
-                file_path=file_path,
-                num_epochs=self.conf["ep"],
-                trainAgain=train_again,
-                proportion=self.proportion,
-                mType=params["modelType"],
-                bs = self.conf["batchSize"],
-                trainParams=params
-            )
+            model = train_pytorchModel(dataset=self.dataset, device=self.device, num_classes=self.num_classes, file_path=file_path, num_epochs=self.conf["ep"], 
+                                    trainAgain=train_again, proportion=self.proportion, mType=params["modelType"], bs = self.conf["batchSize"], trainParams=params)
             train_time = time.time() - start
 
-        # Testing
-        start = time.time()
-        pred_folder = os.path.join(self.conf["Pred_dir"], "exp" + paramsDictToString(params))
-        orig_folder = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"], "images")
+            # Testing
+            start = time.time()
+            pred_folder = os.path.join(self.conf["Pred_dir"], "exp" + paramsDictToString(params))
+            orig_folder = os.path.join(self.conf["TV_dir"], self.conf["Test_dir"], "images")
 
-        prec, rec, oprec, orec = predict_pytorch(
-            dataset_test=self.dataset_test,
-            model=model,
-            device=self.device,
-            predConfidence=params["predconf"],
-            postProcess=0,
-            predFolder=pred_folder,
-            origFolder=orig_folder
-        )
-        test_time = time.time() - start
+            prec, rec, oprec, orec = predict_pytorch(dataset_test=self.dataset_test, model=model,device=self.device, predConfidence=params["predconf"],
+                postProcess=0, predFolder=pred_folder, origFolder=orig_folder )
+            test_time = time.time() - start
+        finally:
+            if model is not None:
+                model.cpu()
+                del model
+            torch.cuda.empty_cache()
 
         metrics = {'prec': prec, 'rec': rec, 'oprec': oprec, 'orec': orec}
+    
+
         return metrics, train_time, test_time
 
+
+# may need to add memory management here too to free models
 
 class DETRExperiment(ModelExperiment):
     """DETR model experiment"""
